@@ -9,7 +9,7 @@ It is deliberately not a chatbot or an autonomous-agent demo. The models interpr
 
 ## Quick start
 
-You need macOS or Linux, [uv](https://docs.astral.sh/uv/), a running [Ollama](https://ollama.com/) service, and enough memory for `gemma4:12b-mlx`.
+You need macOS or Linux, [uv](https://docs.astral.sh/uv/), a running [Ollama](https://ollama.com/) service, and enough memory for `gemma4:12b (-mlx if on macOS)`.
 
 From the repository root:
 
