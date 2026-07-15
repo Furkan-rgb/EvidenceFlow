@@ -153,7 +153,8 @@ async def _doctor_checks(
     except Exception as error:
         policy_error = str(error)
 
-    mlflow_ok = await asyncio.to_thread(
+    mlflow_enabled = settings.mlflow_enabled
+    mlflow_ok = not mlflow_enabled or await asyncio.to_thread(
         _mlflow_health_sync, settings.mlflow_tracking_uri
     )
     return {
@@ -162,6 +163,7 @@ async def _doctor_checks(
         "digest_mismatches": digest_mismatches,
         "policy_index_ok": policy_error is None,
         "policy_index_error": policy_error,
+        "mlflow_enabled": mlflow_enabled,
         "mlflow_ok": mlflow_ok,
     }
 
@@ -193,7 +195,9 @@ def doctor() -> None:
         typer.echo(
             f"[failed] policy index: {checks['policy_index_error']}", err=True
         )
-    if checks["mlflow_ok"]:
+    if not checks.get("mlflow_enabled", True):
+        typer.echo("[disabled] MLflow tracing")
+    elif checks["mlflow_ok"]:
         typer.echo("[ok] MLflow")
     else:
         typer.echo(

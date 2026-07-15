@@ -7,6 +7,33 @@ It reviews a synthetic company-onboarding package as a bounded workflow. It is n
 > [!IMPORTANT]
 > EvidenceFlow V1 is a local portfolio/demo system for synthetic documents only. It has no authentication boundary and must not be exposed to the internet or used with customer, personal, regulated, or confidential data.
 
+## Quick start
+
+Prerequisites: macOS or Linux, [`uv`](https://docs.astral.sh/uv/), a running [Ollama](https://ollama.com/) service, and enough memory for `gemma4:12b-mlx`. Start the Ollama desktop app or run `ollama serve` in a separate terminal if it is not already running.
+
+From the repository root:
+
+```bash
+# One-time local setup
+uv python install 3.12.13
+make setup
+test -f .env || cp .env.example .env
+ollama pull gemma4:12b-mlx
+ollama pull embeddinggemma
+make rebuild
+```
+
+For optional tracing, start `make mlflow` in another terminal now, before starting the application. Then:
+
+```bash
+# Start the API and frontend; this also runs the dependency doctor
+make start
+```
+
+Open `http://127.0.0.1:8000/` and upload the three PDFs in `eval/bundles/bundle_001/documents/` for the happy path, or use `bundle_008` to exercise a registration-conflict review. Upload only the PDFs, not `ground_truth.json`.
+
+With tracing enabled, open `http://127.0.0.1:5001/`. Node.js 22 is needed only for frontend tests, not to run the UI. See [Local setup](#local-setup) for model-alias overrides, MLflow usage, policy-index rebuild rules, and all development commands.
+
 ## What problem it solves
 
 A business reviewer rarely receives one perfect source of truth. A package can contain an application form, an official company extract, a financial statement, optional correspondence, duplicated documents, missing evidence, and mutually inconsistent values.
@@ -56,6 +83,14 @@ flowchart TD
 
 The workflow may interrupt at classification, field, or conflict review. Original model output and source evidence remain unchanged; reviewer-approved, corrected, or selected values are stored as separate effective values with an audit decision. After a correction, deterministic checks run again before reporting.
 
+### What a LangGraph node means here
+
+A **LangGraph node** is one named step in this state machine: a synchronous or asynchronous Python function that reads the current `ReviewState` and returns only the state fields it changed. For example, `process_documents` returns processed pages, `extract_fields` returns typed extractions, and `compose_report` returns the final report. Edges choose which node runs next.
+
+A node is not an autonomous agent and it is not a model. Some nodes call an injected capability such as `FieldExtractor`; others run deterministic Python such as completeness checks, cross-document validation, or review-decision application. Nodes do not instantiate/configure provider clients, manage credentials, or access business persistence directly; they invoke injected adapters when provider or index I/O is needed.
+
+LangGraph supplies the orchestration mechanics around those functions: routing, checkpointing, interrupting for a reviewer, and resuming the same `thread_id`. The checkpoint database records durable graph state after steps, so a stopped process can continue the same workflow. LangChain sits lower in the stack as the Ollama chat/embedding integration used inside a few concrete capability adapters. EvidenceFlow's Pydantic domain models, YAML rules, and deterministic Python remain the source of truth.
+
 ## Architecture
 
 ### The boundary that matters most
@@ -66,31 +101,39 @@ For example, a model may extract `employee_count = 42` from one page and `employ
 
 The reporting model receives a sealed `VerifiedReview` plus retrieved policy evidence. It can explain verified facts, but it cannot create findings or set the canonical company name/status. Every finding and policy ID in its structured narrative is checked against the supplied domain objects.
 
-### Dependency direction
+### Capability boundaries and dependency direction
 
-Application-facing protocols in [`app/ports.py`](app/ports.py) isolate behavior that may change:
+The following names are Python [`Protocol`](app/ports.py) ports: small structural interfaces that describe what the application needs, not base classes, service locators, or separate network services. Runtime adapters are created once in the lifespan composition root, [`app/bootstrap.py`](app/bootstrap.py), and injected into the graph, API, or runner; indexing/evaluation commands compose the same ports separately. Workflow code therefore depends on provider-neutral capabilities while PyMuPDF, LangChain/Ollama, sqlite-vec, SQLite, and the filesystem stay at the edge.
 
-- `DocumentProcessor`
-- `DocumentClassifier`
-- `FieldExtractor`
-- `ReportComposer`
-- `EmbeddingProvider`
-- `PolicyRetriever`
-- `ReviewRepository`
-- `ArtifactStore`
+| Capability | Input → output | V1 adapter and exact responsibility | Called from |
+| --- | --- | --- | --- |
+| `DocumentProcessor` | `UploadedDocument` → `ProcessedDocument` with ordered, one-based `PageContent` | `PyMuPDFDocumentProcessor` reads bytes through an opaque artifact ID, validates PDF structure/encryption/page and text limits, extracts text off the event loop, and never leaks PyMuPDF objects. It does not perform OCR. | `process_documents` graph node |
+| `DocumentClassifier` | `ProcessedDocument` → proposed `DocumentClassification` | `LLMDocumentClassifier` uses schema-constrained Gemma/Ollama output to propose one of the five document types with confidence and reasoning. The later deterministic node—not this adapter—applies the `<0.70` review threshold and preserves any corrected effective type separately. | `classify_documents` graph node |
+| `FieldExtractor` | `ProcessedDocument` + resolved `DocumentType` → typed `ExtractionResult` | `LLMFieldExtractor` uses a type-specific schema to return allowed fields, confidence, and exact one-based page evidence. It validates values and citations but does not normalize values, check completeness, or compare documents. `unknown` produces an empty typed extraction without a model call. | `extract_fields` graph node |
+| `ReportComposer` | sealed `VerifiedReview` + `list[PolicyEvidence]` → validated `ReviewReport` | `LLMReportComposer` writes narrative content only: an executive summary and sections. Unknown finding/policy IDs are rejected, and deterministic `finalize_report` supplies the canonical company name/status and accepts only references present in the verified inputs. | `compose_report` graph node |
+| `EmbeddingProvider` | policy/query text → finite, fixed-dimension vectors | `LangChainEmbeddingProvider` wraps `embeddinggemma`, maps provider failures to typed errors, and validates vector count, 768 dimensions, and finite values. It exposes no LangChain type at its public edge. | policy-index builder and `SqliteVecPolicyRetriever` |
+| `PolicyRetriever` | query + limit → ranked `list[PolicyEvidence]` | `SqliteVecPolicyRetriever` validates the index/manifest identity, embeds the query, searches the pinned read-only sqlite-vec generation, and returns stable policy/section/evidence IDs, text, source path, and score. It supplies support for a finding; it does not decide the finding. | `retrieve_policy_evidence` graph node and evaluation |
+| `ReviewRepository` | review IDs, snapshots, review items/decisions, reports, and jobs ↔ persisted business records | `SQLiteReviewRepository` owns the business review aggregate and durable single-worker queue, including migrations, atomic resume guards, immutable decisions, reports, audit events, and restart recovery. It is deliberately separate from LangGraph's checkpoint database. | FastAPI routes and `WorkflowRunner`; graph nodes do not access it |
+| `ArtifactStore` | review/document IDs + bytes ↔ opaque artifact IDs | `LocalArtifactStore` stores uploads below a configured root with safe identifiers, path-containment checks, and atomic writes. It also implements an export-writing method, although current JSON/Markdown endpoints stream persisted report state directly. It keeps filesystem paths out of domain/API contracts and can later be replaced by object storage. | upload/evidence routes; `DocumentProcessor` reads through its narrower artifact-reader shape |
 
-Graph nodes receive these capabilities. They do not instantiate models, contain provider credentials, or parse arbitrary provider output.
+During one review, they collaborate in this order:
+
+1. The upload route writes PDF bytes through `ArtifactStore`, creates the review/document rows and initial durable job through `ReviewRepository`, and returns `202 processing`.
+2. `WorkflowRunner` claims that job and invokes the LangGraph thread. Its nodes call `DocumentProcessor`, then `DocumentClassifier`, then `FieldExtractor`; separate deterministic nodes decide whether to interrupt and what findings exist.
+3. After validation, `PolicyRetriever` turns finding-derived queries into ranked policy evidence, using `EmbeddingProvider` for compatible query vectors.
+4. `ReportComposer` receives only the sealed `VerifiedReview` and retrieved evidence. Deterministic code validates its references and imposes the canonical identity/status.
+5. The runner persists snapshots, pending items, decisions, or the final report through `ReviewRepository`; the API polls those records/checkpoints and serves owned source PDFs through `ArtifactStore`.
+
+The common dependency path is:
 
 ```mermaid
-flowchart TD
-    G[LangGraph node] --> P[FieldExtractor protocol]
-    P --> S[LLMFieldExtractor]
-    S --> LC[LangChain model abstraction]
-    LC --> LO[LangChain Ollama integration]
-    LO --> O[Local Ollama runtime]
+flowchart LR
+    N[LangGraph node] --> P[EvidenceFlow capability Protocol]
+    P --> A[Concrete edge adapter]
+    A --> L[Library or local runtime]
 ```
 
-That seam matters because classification, extraction, reporting, and embeddings do not need to use the same model forever. A future task/provider change should replace one adapter and its configuration, not rewrite workflow routing.
+This is a ports-and-adapters use of dependency inversion. A future OCR processor, model provider, vector store, relational database, or object store can replace one adapter without moving business truth into graph routing or provider code. Model-free tests use fakes that satisfy the same method shapes.
 
 ### Per-task model configuration
 
@@ -119,16 +162,6 @@ models:
 The three chat tasks are independently overrideable with `EVIDENCEFLOW_CLASSIFICATION_MODEL`, `EVIDENCEFLOW_EXTRACTION_MODEL`, and `EVIDENCEFLOW_REPORTING_MODEL`. Embeddings use `EVIDENCEFLOW_EMBEDDING_MODEL`; all Ollama calls honor `OLLAMA_BASE_URL`.
 
 Only Ollama adapters are implemented in V1. Selecting one of the typed future provider names produces a precise `UnsupportedProviderError`; there is no silent fallback. Chat capabilities use LangChain JSON-schema structured output, validate the result with Pydantic, and allow one bounded repair attempt.
-
-### LangGraph versus LangChain
-
-The two frameworks have deliberately different jobs:
-
-- **LangGraph owns orchestration:** graph state, node/edge routing, checkpointing, interrupts, stable thread identity, and resume behavior.
-- **LangChain is an AI integration layer:** chat/embedding abstractions, the Ollama integrations, and schema-constrained model invocation.
-- **EvidenceFlow owns domain truth:** typed contracts, normalization, comparison rules, review decisions, provenance, and report-reference validation.
-
-EvidenceFlow does not use LangChain agents, ReAct loops, or autonomous tool selection. The review process is known in advance and benefits from an explicit, inspectable state machine. Keeping LangChain below task-level capabilities also prevents provider types from leaking into graph state.
 
 ### Provider responses stop at the domain boundary
 
@@ -187,6 +220,14 @@ V1 uses one graph because the task is bounded, sequential, and audit-sensitive. 
 The tracker uses the stable reviewer-facing sequence **Read PDFs → Classify → Extract fields → Check completeness → Cross-check evidence → Retrieve policy evidence → Compose report**. It is derived from the durable graph checkpoint rather than a timer or estimated percentage, so a long model call stays on its real stage until that work finishes.
 
 The review ID is kept in the URL hash so a refresh restores the active review. Keyboard operation, focus management, stage-transition announcements, reduced-motion support, and high-contrast states are built in. Unchanged polls do not replace the tracker or repeat announcements. Confidence thresholds, conflicts, severity, and policy applicability never run in JavaScript—the API is the boundary. A future React client would not require a workflow rewrite.
+
+#### Why V1 uses short polling
+
+The browser currently schedules an ordinary `GET` 1.5 seconds after each response while a review is processing—roughly 40 requests per minute when responses are fast, which is acceptable for the small local V1 bundles. Durable state and the review ID in the URL hash let a manual retry or refresh restore the review after an app or browser restart. Each response is a fresh read of business state plus the latest LangGraph checkpoint; there is no estimated client-side progress.
+
+Long polling is possible, but a correct implementation cannot wait only for the business `revision`: graph-node transitions advance the separate checkpoint ID without necessarily changing that revision. The robust design would send an opaque token combining both versions, suspend one request for roughly 20–25 seconds, notify a per-review `asyncio.Condition` only after checkpoint/business commits, return immediately on change, and let the frontend reconnect with one cancellable request. A timeout would return the current state as a heartbeat for missed notifications; bounded reconnect/backoff after a dropped request would recover an app restart.
+
+V1 keeps short polling because the current cadence is acceptable for the checked-in small synthetic demos, while an event-driven conversion is cross-cutting. A loop inside FastAPI would merely move repeated SQLite reads server-side while holding a request open: at the same cadence it would not reduce database work, and at a tighter cadence it would increase it. A slimmer progress response or conditional request would be a smaller optimization to consider first. For a future multi-process or horizontally scaled deployment, checkpoint-aware long polling or server-sent events would both need a shared notification source rather than an in-process-only broker.
 
 ### Persistence and local observability
 
@@ -375,12 +416,14 @@ Model aliases vary across local registries/platforms. If `gemma4:12b-mlx` is not
 ```bash
 uv run mlflow server \
   --host 127.0.0.1 \
-  --port 5000 \
+  --port 5001 \
   --backend-store-uri sqlite:///data/mlflow.db \
   --default-artifact-root ./data/mlartifacts
 ```
 
-The equivalent shortcut is `make mlflow`. MLflow is available at `http://127.0.0.1:5000`. To run without it temporarily, set `EVIDENCEFLOW_MLFLOW_ENABLED=false`; the workflow remains functional but tracing is disabled.
+The equivalent shortcut is `make mlflow`. MLflow is available at `http://127.0.0.1:5001`. EvidenceFlow deliberately avoids port 5000 because macOS AirPlay Receiver commonly reserves it. If this repository was already configured, update an existing `.env` that still points `MLFLOW_TRACKING_URI` at port 5000. To run without MLflow temporarily, set `EVIDENCEFLOW_MLFLOW_ENABLED=false`; the workflow remains functional but tracing is disabled.
+
+For a custom port, keep the server and application settings aligned—for example, set `MLFLOW_TRACKING_URI=http://127.0.0.1:5100` in `.env` and run `make mlflow MLFLOW_PORT=5100`. The frontend's convenience link targets the checked-in port 5001; open a custom URL manually.
 
 To inspect a review, open the `evidenceflow` experiment and select **Traces**. A normal execution has a `workflow.execute` root span with task spans such as `document.process`, `ai.classification`, `ai.extraction`, `policy.retrieve`, and `ai.report`. Attributes and outputs show task/model identity, review correlation IDs, counts, latency, and any provider-reported token usage without copying PDF text or prompts into MLflow.
 
@@ -445,7 +488,7 @@ EVIDENCEFLOW_REPORTING_MODEL=gemma4:12b-mlx
 EVIDENCEFLOW_EMBEDDING_MODEL=embeddinggemma
 EVIDENCEFLOW_DATA_DIR=data
 EVIDENCEFLOW_MLFLOW_ENABLED=true
-MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 ```
 
 ### Make command reference
@@ -519,7 +562,7 @@ Keep MLflow running throughout. The explicit equivalent is `uv run python -m app
 
 The genuine local run completed at `2026-07-14T23:11:16Z` with `gemma4:12b-mlx` for classification, extraction, and reporting and `embeddinggemma` for retrieval. It evaluated all 20 bundles / 64 PDFs from fresh model calls (`cache_hit_count: 0`) in 3,971.48 seconds. These values are copied from the committed [JSON result](eval/results/evaluation-results.json) and [generated Markdown result](eval/results/evaluation-results.md), not estimated or hand-written.
 
-Those artifacts identify the exact evaluated implementation by hash. Later UI or API-only changes, including the workflow-progress projection, do not retroactively alter the recorded run; run `make evaluate` again before presenting the metrics as measurements of a newer implementation hash.
+Those artifacts identify the exact evaluated implementation by hash. Later UI, API, documentation, or local operational-default changes do not retroactively alter the recorded run; run `make evaluate` again before presenting the metrics as measurements of a newer implementation hash.
 
 | Metric | Measured result |
 | --- | ---: |
@@ -614,6 +657,7 @@ These are architectural seams, not implemented features:
 - PostgreSQL and object storage;
 - a distributed job system and production authentication/tenancy;
 - more document types and versioned policy/rule sets;
+- checkpoint-aware long polling or server-sent progress events backed by a shared notification source;
 - a React or other compiled frontend consuming the same API.
 
 ## License

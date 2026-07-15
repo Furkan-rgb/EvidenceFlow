@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         False, alias="EVIDENCEFLOW_LOG_SENSITIVE_CONTENT"
     )
     mlflow_tracking_uri: str = Field(
-        "http://127.0.0.1:5000", alias="MLFLOW_TRACKING_URI"
+        "http://127.0.0.1:5001", alias="MLFLOW_TRACKING_URI"
     )
     mlflow_experiment_name: str = Field("evidenceflow", alias="MLFLOW_EXPERIMENT_NAME")
 

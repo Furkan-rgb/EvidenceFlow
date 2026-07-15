@@ -106,7 +106,7 @@ export function renderUpload({ onStart }) {
   traceHint.className = "trace-hint";
   traceHint.append("For an implementation review, open ");
   const traceLink = document.createElement("a");
-  traceLink.href = "http://127.0.0.1:5000";
+  traceLink.href = "http://127.0.0.1:5001";
   traceLink.target = "_blank";
   traceLink.rel = "noreferrer";
   traceLink.textContent = "MLflow traces";

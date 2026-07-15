@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
 
+MLFLOW_HOST ?= 127.0.0.1
+MLFLOW_PORT ?= 5001
+
 .PHONY: help setup doctor mlflow rebuild start generate-data evaluate smoke \
 	test-ollama test frontend-check lint typecheck check
 
@@ -12,10 +15,10 @@ setup: ## Install the locked Python environment and all development extras.
 doctor: ## Check Ollama models/digests, the policy index, and MLflow connectivity.
 	uv run python -m app.cli doctor
 
-mlflow: ## Start the local MLflow server at http://127.0.0.1:5000.
+mlflow: ## Start local MLflow (default http://127.0.0.1:5001).
 	uv run mlflow server \
-		--host 127.0.0.1 \
-		--port 5000 \
+		--host $(MLFLOW_HOST) \
+		--port $(MLFLOW_PORT) \
 		--backend-store-uri sqlite:///data/mlflow.db \
 		--default-artifact-root ./data/mlartifacts
 

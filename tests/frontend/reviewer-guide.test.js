@@ -57,6 +57,7 @@ test("the shell has no footer and the decision explanation uses native details",
   assert.match(uploadView, /document\.createElement\("details"\)/);
   assert.match(uploadView, /How EvidenceFlow reaches a decision/);
   assert.match(uploadView, /Reviewer walkthrough/);
+  assert.match(uploadView, /http:\/\/127\.0\.0\.1:5001/);
   assert.doesNotMatch(uploadView, /What to include/);
   assert.match(styles, /\.button:focus-within\s*\{/);
 });
