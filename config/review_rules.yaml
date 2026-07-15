@@ -1,0 +1,49 @@
+required_documents:
+  - application_form
+  - company_extract
+  - financial_statement
+
+required_fields:
+  application_form:
+    - company_name
+    - registration_number
+    - annual_revenue_eur
+    - employee_count
+  company_extract:
+    - company_name
+    - registration_number
+    - incorporation_date
+  financial_statement:
+    - company_name
+    - annual_revenue_eur
+    - reporting_year
+  supporting_correspondence: []
+
+confidence:
+  field_review_threshold: 0.75
+  classification_review_threshold: 0.70
+
+exact_match_rules:
+  - field: registration_number
+    sources:
+      - application_form
+      - company_extract
+
+normalised_match_rules:
+  - field: company_name
+    sources:
+      - application_form
+      - company_extract
+      - financial_statement
+
+numeric_tolerance_rules:
+  - field: annual_revenue_eur
+    sources:
+      - application_form
+      - financial_statement
+    tolerance_percent: 2.0
+  - field: employee_count
+    sources:
+      - application_form
+      - financial_statement
+    tolerance_absolute: 0
