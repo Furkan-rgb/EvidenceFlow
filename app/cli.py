@@ -5,23 +5,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
-from urllib.error import URLError
-from urllib.parse import urlparse
-from urllib.request import urlopen
 
 import typer
 
 from app.ai import LLMDocumentClassifier, LLMFieldExtractor, LLMReportComposer
-from app.ai.config import ModelsConfig, load_models_config
-from app.ai.models import create_chat_model, create_embedding_provider
-from app.bootstrap import (
-    model_digests,
-    model_task_metadata,
-    ollama_inventory,
-    probe_ollama,
+from app.ai.config import MODELS_CONFIG_PATH, ModelsConfig, load_models_config
+from app.ai.models import (
+    LangChainEmbeddingProvider,
+    create_chat_model,
+    create_embedding_provider,
 )
+from app.bootstrap import model_task_metadata
 from app.config import Settings
 from app.domain import (
     DocumentType,
@@ -35,7 +32,18 @@ from app.evaluation.workflow_adapter import (
     WorkflowEvaluationAdapter,
 )
 from app.observability import MlflowTracer
-from app.retrieval import PolicyIndexBuilder, SqliteVecPolicyRetriever
+from app.preparation import (
+    CheckOutcome,
+    PreparationMode,
+    PreparationReport,
+    prepare_model_providers,
+)
+from app.preparation.runtime import prepare_application, require_prepared
+from app.retrieval import (
+    PolicyIndexBuilder,
+    PolicyIndexManifest,
+    SqliteVecPolicyRetriever,
+)
 from app.review import build_verified_review, load_review_rules
 
 app = typer.Typer(
@@ -46,24 +54,24 @@ app = typer.Typer(
 
 def _settings_and_models() -> tuple[Settings, ModelsConfig]:
     settings = Settings()
-    settings.ensure_directories()
     models = load_models_config(
-        settings.models_config,
-        classification_model=settings.classification_model,
-        extraction_model=settings.extraction_model,
-        reporting_model=settings.reporting_model,
-        embedding_model=settings.embedding_model,
         ollama_base_url=settings.ollama_base_url,
     )
     return settings, models
 
 
 def _sha256_files(paths: list[Path]) -> str:
+    repository_root = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256()
     for path in paths:
-        digest.update(path.as_posix().encode("utf-8"))
+        resolved = path.resolve()
+        try:
+            identity = resolved.relative_to(repository_root).as_posix()
+        except ValueError:
+            identity = path.as_posix()
+        digest.update(identity.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(resolved.read_bytes())
     return digest.hexdigest()
 
 
@@ -89,130 +97,73 @@ def _implementation_sha256() -> str:
     return digest.hexdigest()
 
 
-def _required_models(models: ModelsConfig) -> set[str]:
-    return {
-        models.classification.model,
-        models.extraction.model,
-        models.reporting.model,
-        models.embeddings.model,
-    }
+def _render_preparation(report: PreparationReport) -> None:
+    error_stream = not report.ready
+    typer.echo(
+        f"EvidenceFlow preparation ({report.mode.value.replace('_', ' ')})",
+        err=error_stream,
+    )
+    for result in report.results:
+        if result.outcome is CheckOutcome.PASSED:
+            label = "ok"
+        elif result.outcome is CheckOutcome.SKIPPED:
+            label = "disabled" if result.code == "telemetry_disabled" else "skipped"
+        elif result.warning:
+            label = "warning"
+        else:
+            label = "failed"
+        scope = (
+            result.task.value if result.task is not None else result.component.value
+        ).replace("_", " ")
+        typer.echo(f"[{label}] {scope}: {result.message}", err=error_stream)
+        if result.outcome is CheckOutcome.FAILED and result.remediation:
+            typer.echo(f"         Fix: {result.remediation}", err=error_stream)
 
-
-def _require_ollama(settings: Settings, models: ModelsConfig) -> None:
-    if not asyncio.run(
-        probe_ollama(
-            settings.ollama_base_url,
-            _required_models(models),
-            model_digests(models),
-        )
-    ):
+    if report.ready:
+        suffix = " with warnings" if report.warnings else ""
+        typer.echo(f"Preparation ready{suffix}.")
+    else:
         typer.echo(
-            "Ollama is unavailable, a configured model is missing, or a model "
-            "digest differs from config/models.yaml.",
+            f"Preparation blocked by {len(report.blocking_failures)} critical check(s).",
+            err=error_stream,
+        )
+
+
+def _prepare_or_exit(
+    mode: PreparationMode,
+    *,
+    policies_dir: Path | None = None,
+) -> tuple[Settings, ModelsConfig, PreparationReport]:
+    try:
+        settings, models = _settings_and_models()
+        if policies_dir is not None:
+            settings = settings.model_copy(update={"policies_dir": policies_dir})
+        report = asyncio.run(prepare_application(settings, models, mode=mode))
+    except Exception as error:
+        typer.echo(
+            "[failed] configuration: runtime settings or config/models.yaml "
+            "could not be loaded.",
             err=True,
         )
+        raise typer.Exit(1) from error
+    _render_preparation(report)
+    if not report.ready:
         raise typer.Exit(1)
+    return settings, models, report
 
 
-def _mlflow_health_sync(tracking_uri: str) -> bool:
-    parsed = urlparse(tracking_uri)
-    if parsed.scheme not in {"http", "https"}:
-        return True
-    try:
-        with urlopen(f"{tracking_uri.rstrip('/')}/health", timeout=2.0) as response:
-            status = int(response.status)
-            return 200 <= status < 300
-    except (OSError, URLError, ValueError):
-        return False
+@app.command()
+def prepare() -> None:
+    """Validate every dependency required before the app accepts work."""
 
-
-async def _doctor_checks(
-    settings: Settings, models: ModelsConfig
-) -> dict[str, object]:
-    inventory = await ollama_inventory(settings.ollama_base_url)
-    required = _required_models(models)
-    expected_digests = model_digests(models)
-    missing_models = sorted(required - set(inventory))
-    digest_mismatches = {
-        model: {"expected": digest, "actual": inventory.get(model)}
-        for model, digest in expected_digests.items()
-        if inventory.get(model) != digest
-    }
-    ollama_ok = not missing_models and not digest_mismatches
-
-    policy_error: str | None = None
-    try:
-        SqliteVecPolicyRetriever(
-            create_embedding_provider(models.embeddings),
-            dimensions=models.embeddings.dimensions,
-            index_path=settings.policy_index_path,
-            manifest_path=settings.policy_manifest_path,
-            model_digest=models.embeddings.model_digest,
-            policies_dir=settings.policies_dir,
-        )
-    except Exception as error:
-        policy_error = str(error)
-
-    mlflow_enabled = settings.mlflow_enabled
-    mlflow_ok = not mlflow_enabled or await asyncio.to_thread(
-        _mlflow_health_sync, settings.mlflow_tracking_uri
-    )
-    return {
-        "ollama_ok": ollama_ok,
-        "missing_models": missing_models,
-        "digest_mismatches": digest_mismatches,
-        "policy_index_ok": policy_error is None,
-        "policy_index_error": policy_error,
-        "mlflow_enabled": mlflow_enabled,
-        "mlflow_ok": mlflow_ok,
-    }
+    _prepare_or_exit(PreparationMode.RUNTIME)
 
 
 @app.command()
 def doctor() -> None:
-    """Fail early on missing critical local runtime dependencies."""
+    """Compatibility alias for the preparation command."""
 
-    try:
-        settings, models = _settings_and_models()
-        checks = asyncio.run(_doctor_checks(settings, models))
-    except Exception as error:
-        typer.echo(f"[failed] configuration: {error}", err=True)
-        raise typer.Exit(1) from error
-
-    typer.echo("EvidenceFlow preflight")
-    if checks["ollama_ok"]:
-        typer.echo("[ok] Ollama and configured model digests")
-    else:
-        missing = checks["missing_models"]
-        mismatches = checks["digest_mismatches"]
-        typer.echo(
-            f"[failed] Ollama models (missing={missing}, digest_mismatches={mismatches})",
-            err=True,
-        )
-    if checks["policy_index_ok"]:
-        typer.echo("[ok] policy index, manifest, corpus, chunks, and vectors")
-    else:
-        typer.echo(
-            f"[failed] policy index: {checks['policy_index_error']}", err=True
-        )
-    if not checks.get("mlflow_enabled", True):
-        typer.echo("[disabled] MLflow tracing")
-    elif checks["mlflow_ok"]:
-        typer.echo("[ok] MLflow")
-    else:
-        typer.echo(
-            "[warning] MLflow is unavailable; runtime remains fail-open and /health "
-            "will report degraded telemetry.",
-            err=True,
-        )
-
-    if not checks["ollama_ok"] or not checks["policy_index_ok"]:
-        typer.echo(
-            "Preflight failed. Start Ollama/pull the configured models or run "
-            "`make rebuild`, then retry.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    prepare()
 
 
 @app.command()
@@ -234,26 +185,40 @@ def rebuild_policy_index_command(
         Path, typer.Option(file_okay=False, dir_okay=True)
     ] = Path("policies"),
 ) -> None:
-    """Atomically rebuild the sqlite-vec policy index with embeddinggemma."""
+    """Atomically rebuild the sqlite-vec index with the configured embedder."""
 
-    settings, models = _settings_and_models()
-    _require_ollama(settings, models)
+    settings, models, _report = _prepare_or_exit(
+        PreparationMode.POLICY_INDEX_REBUILD,
+        policies_dir=policies_dir,
+    )
     embedder = create_embedding_provider(models.embeddings)
     manifest = asyncio.run(
-        PolicyIndexBuilder(
-            embedder,
-            dimensions=models.embeddings.dimensions,
-            model_digest=models.embeddings.model_digest,
-        ).rebuild(
-            policies_dir=policies_dir,
-            index_path=settings.policy_index_path,
-            manifest_path=settings.policy_manifest_path,
-        )
+        _rebuild_policy_index(settings=settings, models=models, embedder=embedder)
     )
     typer.echo(
         f"Indexed {manifest.document_count} policies / {manifest.chunk_count} chunks "
         f"with {manifest.model} ({manifest.dimensions} dimensions)."
     )
+
+
+async def _rebuild_policy_index(
+    *,
+    settings: Settings,
+    models: ModelsConfig,
+    embedder: LangChainEmbeddingProvider,
+) -> PolicyIndexManifest:
+    try:
+        return await PolicyIndexBuilder(
+            embedder,
+            dimensions=models.embeddings.dimensions,
+            model_digest=models.embeddings.model_digest,
+        ).rebuild(
+            policies_dir=settings.policies_dir,
+            index_path=settings.policy_index_path,
+            manifest_path=settings.policy_manifest_path,
+        )
+    finally:
+        await embedder.aclose()
 
 
 @app.command("generate-eval-data")
@@ -282,50 +247,57 @@ async def _run_real_evaluation(
 ) -> tuple[dict[str, object], tuple[Path, Path]]:
     rules = load_review_rules(settings.rules_config)
     embedder = create_embedding_provider(models.embeddings)
-    retriever = SqliteVecPolicyRetriever(
-        embedder,
-        dimensions=models.embeddings.dimensions,
-        index_path=settings.policy_index_path,
-        manifest_path=settings.policy_manifest_path,
-        model_digest=models.embeddings.model_digest,
-        policies_dir=settings.policies_dir,
-    )
-    adapter = WorkflowEvaluationAdapter(
-        models=models,
-        rules=rules,
-        retriever=retriever,
-        tracer=tracer,
-        max_pages=settings.max_pages,
-    )
-    configuration_hash = _sha256_files(
-        [settings.models_config, settings.rules_config, settings.policy_manifest_path]
-    )
-    result = await run_evaluation(
-        bundles_dir,
-        adapter,
-        retrieval_adapter=PolicyRetrieverEvaluationAdapter(
-            retriever,
+    retriever: SqliteVecPolicyRetriever | None = None
+    try:
+        retriever = SqliteVecPolicyRetriever(
+            embedder,
+            dimensions=models.embeddings.dimensions,
+            index_path=settings.policy_index_path,
+            manifest_path=settings.policy_manifest_path,
+            model_digest=models.embeddings.model_digest,
+            policies_dir=settings.policies_dir,
+        )
+        adapter = WorkflowEvaluationAdapter(
+            models=models,
+            rules=rules,
+            retriever=retriever,
             tracer=tracer,
-            task_metadata=model_task_metadata(models)["embeddings"],
-        ),
-        metadata={
-            "classification_model": models.classification.model,
-            "classification_model_digest": models.classification.model_digest,
-            "extraction_model": models.extraction.model,
-            "extraction_model_digest": models.extraction.model_digest,
-            "reporting_model": models.reporting.model,
-            "reporting_model_digest": models.reporting.model_digest,
-            "embedding_model": models.embeddings.model,
-            "embedding_model_digest": models.embeddings.model_digest,
-            "configuration_sha256": configuration_hash,
-            "implementation_sha256": _implementation_sha256(),
-        },
-        progress_path=progress_path,
-    )
-    if not tracer.healthy or tracer.ever_failed:
-        raise RuntimeError("MLflow tracing became unavailable during evaluation")
-    paths = result.write(output_dir)
-    return result.as_dict(), paths
+            max_pages=settings.max_pages,
+        )
+        configuration_hash = _sha256_files(
+            [MODELS_CONFIG_PATH, settings.rules_config, settings.policy_manifest_path]
+        )
+        result = await run_evaluation(
+            bundles_dir,
+            adapter,
+            retrieval_adapter=PolicyRetrieverEvaluationAdapter(
+                retriever,
+                tracer=tracer,
+                task_metadata=model_task_metadata(models)["embeddings"],
+            ),
+            metadata={
+                "classification_model": models.classification.model,
+                "classification_model_digest": models.classification.model_digest,
+                "extraction_model": models.extraction.model,
+                "extraction_model_digest": models.extraction.model_digest,
+                "reporting_model": models.reporting.model,
+                "reporting_model_digest": models.reporting.model_digest,
+                "embedding_model": models.embeddings.model,
+                "embedding_model_digest": models.embeddings.model_digest,
+                "configuration_sha256": configuration_hash,
+                "implementation_sha256": _implementation_sha256(),
+            },
+            progress_path=progress_path,
+        )
+        if not tracer.healthy or tracer.ever_failed:
+            raise RuntimeError("MLflow tracing became unavailable during evaluation")
+        paths = result.write(output_dir)
+        return result.as_dict(), paths
+    finally:
+        if retriever is not None:
+            with suppress(Exception):
+                retriever.close()
+        await embedder.aclose()
 
 
 @app.command()
@@ -341,8 +313,7 @@ def evaluate(
 
     import mlflow
 
-    settings, models = _settings_and_models()
-    _require_ollama(settings, models)
+    settings, models, _report = _prepare_or_exit(PreparationMode.EVALUATION)
     tracer = MlflowTracer(settings.mlflow_tracking_uri, "evidenceflow-evaluation")
     if not tracer.healthy or tracer.ever_failed:
         typer.echo("MLflow is unavailable; evaluation tracing fails closed.", err=True)
@@ -434,13 +405,19 @@ def evaluate(
     typer.echo(f"Wrote genuine evaluation results to {paths[0]} and {paths[1]}.")
 
 
-async def _ollama_smoke(settings: Settings, models: ModelsConfig) -> dict[str, object]:
-    if not await probe_ollama(
-        settings.ollama_base_url,
-        _required_models(models),
-        model_digests(models),
-    ):
-        raise RuntimeError("Ollama is unavailable or one of the configured models is missing")
+async def _ollama_smoke(
+    settings: Settings,
+    models: ModelsConfig,
+    *,
+    prepared: bool = False,
+) -> dict[str, object]:
+    if not prepared:
+        provider_report = await prepare_model_providers(
+            models,
+            mode=PreparationMode.RUNTIME,
+            default_ollama_base_url=settings.ollama_base_url,
+        )
+        require_prepared(provider_report)
     document = ProcessedDocument(
         document_id="ollama-smoke-application",
         filename="application_form.pdf",
@@ -465,17 +442,20 @@ async def _ollama_smoke(settings: Settings, models: ModelsConfig) -> dict[str, o
         create_chat_model(models.extraction)
     ).extract(document, DocumentType.APPLICATION_FORM)
     embedder = create_embedding_provider(models.embeddings)
-    embedding = await embedder.embed_query("registration number conflict")
-    verified = build_verified_review(
-        review_id="ollama-smoke-review",
-        classifications=[],
-        extractions=[],
-        effective_fields=[],
-        findings=[],
-    )
-    report = await LLMReportComposer(create_chat_model(models.reporting)).compose(
-        verified, []
-    )
+    try:
+        embedding = await embedder.embed_query("registration number conflict")
+        verified = build_verified_review(
+            review_id="ollama-smoke-review",
+            classifications=[],
+            extractions=[],
+            effective_fields=[],
+            findings=[],
+        )
+        report = await LLMReportComposer(create_chat_model(models.reporting)).compose(
+            verified, []
+        )
+    finally:
+        await embedder.aclose()
     return {
         "classification": classification.document_type.value,
         "extracted_field_count": len(extraction.fields),
@@ -490,7 +470,16 @@ def ollama_smoke_command() -> None:
 
     settings, models = _settings_and_models()
     try:
-        result = asyncio.run(_ollama_smoke(settings, models))
+        provider_report = asyncio.run(
+            prepare_model_providers(
+                models,
+                mode=PreparationMode.RUNTIME,
+                default_ollama_base_url=settings.ollama_base_url,
+            )
+        )
+        _render_preparation(provider_report)
+        require_prepared(provider_report)
+        result = asyncio.run(_ollama_smoke(settings, models, prepared=True))
     except Exception as error:
         typer.echo(f"Ollama smoke failed: {error}", err=True)
         raise typer.Exit(1) from error

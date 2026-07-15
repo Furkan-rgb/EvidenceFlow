@@ -3,7 +3,7 @@
 MLFLOW_HOST ?= 127.0.0.1
 MLFLOW_PORT ?= 5001
 
-.PHONY: help setup doctor mlflow rebuild start generate-data evaluate smoke \
+.PHONY: help setup prepare doctor mlflow rebuild start generate-data evaluate smoke \
 	test-ollama test frontend-check lint typecheck check
 
 help: ## Show the available developer commands.
@@ -12,8 +12,10 @@ help: ## Show the available developer commands.
 setup: ## Install the locked Python environment and all development extras.
 	uv sync --locked --all-extras --dev
 
-doctor: ## Check Ollama models/digests, the policy index, and MLflow connectivity.
-	uv run python -m app.cli doctor
+prepare: ## Validate configuration, storage, models, the policy index, and telemetry readiness.
+	uv run python -m app.cli prepare
+
+doctor: prepare ## Compatibility alias for prepare.
 
 mlflow: ## Start local MLflow (default http://127.0.0.1:5001).
 	uv run mlflow server \
@@ -25,13 +27,13 @@ mlflow: ## Start local MLflow (default http://127.0.0.1:5001).
 rebuild: ## Atomically rebuild the policy index with the configured embedder.
 	uv run python -m app.cli rebuild-policy-index
 
-start: doctor ## Validate critical dependencies, then start the app and UI.
+start: prepare ## Validate critical dependencies, then start the app and UI.
 	uv run python -m app.cli run --host 127.0.0.1 --port 8000
 
 generate-data: ## Regenerate the deterministic 20-bundle synthetic PDF corpus.
 	uv run python -m app.cli generate-eval-data --output-dir eval/bundles --overwrite
 
-evaluate: doctor ## Run the real 20-bundle evaluation (MLflow is mandatory).
+evaluate: prepare ## Run the real 20-bundle evaluation (MLflow is mandatory).
 	uv run python -m app.cli evaluate --bundles-dir eval/bundles --output-dir eval/results
 
 smoke: ## Exercise every configured real Ollama task adapter.

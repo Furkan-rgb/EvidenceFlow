@@ -30,7 +30,7 @@ pytestmark = [
 async def test_real_models_complete_a_consistent_langgraph_review() -> None:
     root = Path(__file__).parents[2]
     settings = Settings()
-    models = load_models_config(settings.models_config)
+    models = load_models_config(ollama_base_url=settings.ollama_base_url)
     retriever = SqliteVecPolicyRetriever(
         create_embedding_provider(models.embeddings),
         dimensions=models.embeddings.dimensions,

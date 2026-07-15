@@ -22,14 +22,15 @@ Run all repository commands below from the repository root.
 Use this sequence for a new clone. Commands labelled as separate terminals remain
 running.
 
-1. Install the exact Python version, synchronize the committed lockfile, and create a
-   local environment file without overwriting an existing one:
+1. Install the exact Python version and synchronize the committed lockfile:
 
    ```bash
    uv python install 3.12.13
    make setup
-   test -f .env || cp .env.example .env
    ```
+
+   The checked-in defaults do not require a `.env` file. You can delete it if you do
+   not need local operational overrides.
 
 2. Start Ollama in a separate terminal if the desktop application or service is not
    already running:
@@ -53,62 +54,106 @@ running.
    make mlflow
    ```
 
-5. Build the ignored local policy index, then start the API, workflow worker, and
-   frontend:
+5. Build the ignored local policy index, then run the explicit preparation gate:
 
    ```bash
    make rebuild
+   make prepare
+   ```
+
+6. Start the API, workflow worker, and frontend. `make start` repeats the preparation
+   gate so readiness cannot be skipped accidentally:
+
+   ```bash
    make start
    ```
 
-6. Open `http://127.0.0.1:8000/`. For a first review, upload the three PDFs from
+7. Open `http://127.0.0.1:8000/`. For a first review, upload the three PDFs from
    `eval/bundles/bundle_001/documents/`. Upload the PDFs only, not
    `ground_truth.json`.
 
 `make start` occupies its terminal until it is stopped. MLflow is optional for an
-ordinary review: if tracing is enabled but its server is unavailable, preflight emits a
-warning and the review still runs. Evaluation requires healthy MLflow throughout.
+ordinary review: if tracing is enabled but its server is unavailable, preparation emits
+a warning and the review still runs. Evaluation requires healthy MLflow throughout.
 
 ## Model configuration and aliases
 
 [`config/models.yaml`](../config/models.yaml) independently configures classification,
 extraction, reporting, and embeddings. The checked-in defaults use
 `gemma4:12b-mlx` for all three chat tasks and `embeddinggemma` with 768 dimensions for
-policy retrieval. Model digests are pinned so preflight can detect an unexpected local
+policy retrieval. Model digests are pinned so preparation can detect an unexpected local
 model behind a familiar tag.
+
+`models.yaml` is the single source of truth for provider and model selection. It owns
+each task's provider, model alias, digest, default endpoint, timeout, and generation
+settings. Model aliases are deliberately not overridden through `.env`, so inspecting
+one file shows exactly what the application will use.
 
 Ollama aliases and available builds can differ by platform. If
 `gemma4:12b-mlx` is unavailable under that exact name, install a local Gemma model that
-supports the required JSON-schema structured output and set all three overrides in
-`.env`:
+supports the required JSON-schema structured output, then edit the relevant entries in
+`models.yaml`. For one shared replacement, update all three chat tasks:
 
-```dotenv
-EVIDENCEFLOW_CLASSIFICATION_MODEL=your-gemma-alias
-EVIDENCEFLOW_EXTRACTION_MODEL=your-gemma-alias
-EVIDENCEFLOW_REPORTING_MODEL=your-gemma-alias
+```yaml
+models:
+  classification:
+    model: your-gemma-alias
+  extraction:
+    model: your-gemma-alias
+  reporting:
+    model: your-gemma-alias
 ```
 
-Run `make smoke` before relying on an alternative model. It exercises classification,
-extraction, reporting, and embeddings against the configured Ollama runtime. Changing
-the embedding model is more involved: its configured dimensions and identity must
-match the vectors it returns, and the policy index must then be rebuilt.
+Also set the matching digest and retain the other required fields in the real file.
+Run `make prepare` and `make smoke` before relying on an alternative model. Smoke
+testing exercises classification, extraction, reporting, and embeddings against the
+configured Ollama runtime. Changing the embedding model is more involved: its
+configured dimensions and identity must match the vectors it returns, and the policy
+index must then be rebuilt.
 
-All Ollama tasks honor `OLLAMA_BASE_URL`. The complete environment template is
-[`../.env.example`](../.env.example). Existing `.env` files are intentionally not
-overwritten by setup; update them manually when checked-in defaults change.
+`.env` is optional and reserved for operational settings such as local data paths,
+upload limits, telemetry, or an `OLLAMA_BASE_URL` endpoint override. The complete list
+is in [`../.env.example`](../.env.example). You can also export those values in your
+shell instead of creating a file.
 
-## Preflight, startup, and health
+V1 implements only Ollama adapters. If a cloud adapter is added later, its
+provider/model/deployment identity will still belong in `models.yaml`; API keys and
+tokens must stay in environment variables or a secret store. The provider's preparation
+check should verify that credentials exist and can authenticate, and that the configured
+deployment is reachable, without printing secret values.
 
-`make doctor` checks the configuration, Ollama availability, required model names and
-digests, policy-index compatibility, and MLflow connectivity. Missing models, digest
-mismatches, or an invalid/missing policy index are critical and produce a non-zero
-exit. Unavailable MLflow is a warning for the runtime because tracing is fail-open. If
-tracing is explicitly disabled, doctor reports it as disabled instead of unavailable.
+## Preparation, startup, and health
 
-`make start` always runs `make doctor` first. On success it starts FastAPI, the durable
-single-worker queue, LangGraph checkpointing, and the static frontend at
+`make prepare` is the single fail-early readiness flow. It reports each check before
+the application accepts work:
+
+| Check | Failure behavior |
+| --- | --- |
+| Typed YAML configuration and supported provider adapters | Critical: exit non-zero. |
+| Writable runtime storage and local database readiness | Critical: exit non-zero. |
+| Provider connectivity, configured task models, and pinned digests | Critical: exit non-zero. |
+| Policy-index presence and compatibility with policies/embedder | Critical: exit non-zero. |
+| MLflow connectivity when tracing is enabled | Warning for interactive runtime; tracing degrades safely. |
+
+Critical failures include a safe explanation and remediation without a stack trace or
+credential value. `make doctor` remains as a compatibility alias for `make prepare`.
+If tracing is explicitly disabled, preparation reports it as disabled rather than
+unavailable.
+
+Preparation deliberately uses lightweight provider inventory/authentication checks; it
+does not load the 12B chat model and run inference on every restart. Run `make smoke`
+after installing or changing a model to verify real structured-output and embedding
+calls.
+
+`make start` always runs the same preparation flow first. On success it starts FastAPI,
+the durable single-worker queue, LangGraph checkpointing, and the static frontend at
 `http://127.0.0.1:8000/`. It also applies pending business-database migrations during
 application lifespan startup.
+
+Evaluation is stricter than an interactive review. `make evaluate` first prepares the
+application, then requires MLflow to remain healthy for the full benchmark. Disabled,
+unreachable, or failed evaluation tracing makes the evaluation fail closed rather than
+publishing an incompletely observed result.
 
 After startup, inspect the safe dependency summary with:
 
@@ -139,7 +184,9 @@ and provider-reported token usage when available. Document text, prompts, and so
 excerpts are not logged by default. The separate `evidenceflow-evaluation` experiment
 contains benchmark runs and per-bundle traces.
 
-For a custom port, change both the server and application setting:
+For a custom port, change both the server and application setting. Export the
+application setting in the shell that starts EvidenceFlow, or put it in an optional
+`.env` file if you want it to persist:
 
 ```bash
 MLFLOW_PORT=5100 make mlflow
@@ -153,8 +200,14 @@ The frontend convenience link always targets the checked-in port 5001, so open a
 custom MLflow URL manually. `MLFLOW_HOST` also controls the Make target's bind host;
 leave it on `127.0.0.1` for this local application.
 
-To run ordinary reviews without tracing, set the following value in `.env` and restart
-EvidenceFlow:
+To run ordinary reviews without tracing, export the following value (or place it in an
+optional `.env`) and restart EvidenceFlow:
+
+```bash
+export EVIDENCEFLOW_MLFLOW_ENABLED=false
+```
+
+The equivalent optional `.env` entry is:
 
 ```dotenv
 EVIDENCEFLOW_MLFLOW_ENABLED=false
@@ -239,10 +292,11 @@ Run `make` or `make help` to print this command list from the Makefile.
 | --- | --- |
 | `make help` | Print all documented Make targets. |
 | `make setup` | First clone or whenever `uv.lock` changes. |
-| `make doctor` | Diagnose configuration, Ollama/model, policy-index, and MLflow readiness. |
+| `make prepare` | Run every startup-readiness check and fail early on critical errors. |
+| `make doctor` | Compatibility alias for `make prepare`. |
 | `make mlflow` | Start local MLflow; required throughout evaluation. |
 | `make rebuild` | Build or atomically replace the policy index. |
-| `make start` | Run preflight, then start the API, worker, and frontend. |
+| `make start` | Run preparation, then start the API, worker, and frontend. |
 | `make generate-data` | Deliberately regenerate all 20 deterministic PDF bundles. |
 | `make evaluate` | Run the genuine 20-bundle local-model benchmark and write result artifacts. |
 | `make smoke` | Exercise every configured real Ollama task adapter. |
@@ -253,32 +307,35 @@ Run `make` or `make help` to print this command list from the Makefile.
 | `make typecheck` | Run strict mypy checks over `app/`. |
 | `make check` | Run lock verification, setup, lint, typing, and all model-free tests as CI does. |
 
-The MLflow target accepts `MLFLOW_HOST` and `MLFLOW_PORT` Make variables. Other runtime
-configuration belongs in `.env`; use
-[`../.env.example`](../.env.example) as the authoritative key/value reference.
+The MLflow target accepts `MLFLOW_HOST` and `MLFLOW_PORT` Make variables. Runtime
+settings may be exported in the shell or stored in an optional ignored `.env`; use
+[`../.env.example`](../.env.example) as the key/value reference. Provider/model identity
+and task behavior always belong in [`config/models.yaml`](../config/models.yaml).
 
 ## Troubleshooting
 
-### Doctor reports missing models or digest mismatches
+### Preparation reports missing models or digest mismatches
 
 Confirm that Ollama is running and inspect `ollama list`. Pull the exact configured
-aliases again, or apply the alternative-model overrides described above. A same-name
-digest mismatch is intentional protection against silently running a different model;
+aliases again, or edit the relevant task definitions in `config/models.yaml` as
+described above. A same-name digest mismatch is intentional protection against
+silently running a different model;
 align the local model with [`config/models.yaml`](../config/models.yaml) rather than
 ignoring the warning.
 
-### Doctor reports a missing, stale, or incompatible policy index
+### Preparation reports a missing, stale, or incompatible policy index
 
-Confirm that `embeddinggemma` is available, then run `make rebuild`. If an embedding
-override is intentional, verify its dimension configuration before rebuilding. Do not
-copy an index from a machine whose model digest or policy corpus differs.
+Confirm that the embedding model configured in `models.yaml` is available, then run
+`make rebuild`. If an embedding-model change is intentional, verify its dimensions and
+digest before rebuilding. Do not copy an index from a machine whose model digest or
+policy corpus differs.
 
 ### MLflow is unavailable or an old checkout still targets port 5000
 
-Start `make mlflow` before EvidenceFlow and ensure `.env` contains
-`MLFLOW_TRACKING_URI=http://127.0.0.1:5001`. Port 5000 is commonly occupied by macOS
-AirPlay Receiver. Use the paired custom-port settings above if 5001 is also occupied,
-or disable tracing for ordinary reviews. Restart EvidenceFlow after changing `.env`.
+Start `make mlflow` before EvidenceFlow. The default tracking URI is
+`http://127.0.0.1:5001`; port 5000 is commonly occupied by macOS AirPlay Receiver. Use
+the paired custom-port settings above if 5001 is also occupied, or disable tracing for
+ordinary reviews. Restart EvidenceFlow after changing the environment.
 
 ### Port 8000 is already in use
 

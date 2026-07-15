@@ -98,6 +98,39 @@ async def create_review(
     )
 
 
+@pytest.mark.asyncio
+async def test_health_uses_provider_neutral_readiness_names(api: APIHarness) -> None:
+    response = await api.client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "degraded",
+        "ready": False,
+        "dependencies": {
+            "database": "ok",
+            "storage": "ok",
+            "policy_index": "unavailable",
+            "model_providers": "unavailable",
+            "mlflow": "ok",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_remains_ready_but_degraded_when_only_mlflow_fails(
+    api: APIHarness,
+) -> None:
+    api.container.policy_index_healthy = True
+    api.container.model_runtime_healthy = True
+    api.container.tracer = SimpleNamespace(enabled=True, healthy=False)
+
+    response = await api.client.get("/health")
+
+    assert response.json()["ready"] is True
+    assert response.json()["status"] == "degraded"
+    assert response.json()["dependencies"]["mlflow"] == "degraded"
+
+
 async def add_pending_item(
     repository: SQLiteReviewRepository,
     review_id: str,

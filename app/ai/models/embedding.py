@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
+from contextlib import suppress
 
 from langchain_core.embeddings import Embeddings
 
@@ -55,6 +57,19 @@ class LangChainEmbeddingProvider:
                 details={"provider": self.provider, "model": self.model},
             ) from exc
         return self._validate([vector], expected_count=1)[0]
+
+    async def aclose(self) -> None:
+        """Best-effort cleanup for provider-owned sync and async HTTP clients."""
+
+        for attribute in ("_async_client", "_client"):
+            client = getattr(self._embeddings, attribute, None)
+            close = getattr(client, "close", None)
+            if not callable(close):
+                continue
+            with suppress(Exception):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
 
     def _validate(
         self, vectors: list[list[float]], *, expected_count: int

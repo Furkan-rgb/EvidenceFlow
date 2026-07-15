@@ -16,7 +16,6 @@ From the repository root:
 ```bash
 uv python install 3.12.13
 make setup
-test -f .env || cp .env.example .env
 
 ollama pull gemma4:12b-mlx
 ollama pull embeddinggemma
@@ -34,11 +33,16 @@ make mlflow
 Then, from the original terminal:
 
 ```bash
-# Validates the models and policy index, then starts the API and UI
+# Shows every readiness check explicitly
+make prepare
+
+# Repeats preparation, then starts the API and UI
 make start
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) and upload the three PDFs from `eval/bundles/bundle_001/documents/`. If tracing is running, MLflow is available at [http://127.0.0.1:5001](http://127.0.0.1:5001). Detailed setup and troubleshooting are in [Local development](docs/local-development.md).
+
+You do not need a `.env` file for the checked-in local setup. [`config/models.yaml`](config/models.yaml) is the single source of truth for model/provider identity, digests, and task settings. Create a `.env` only for optional operational settings such as telemetry or a local endpoint override—or, if a cloud provider adapter is added in the future, its uncommitted credentials.
 
 ## What EvidenceFlow reviews
 
@@ -299,7 +303,7 @@ For the exact inputs, outputs, adapter guarantees, and call sites, see [Architec
 | Reporting | `gemma4:12b-mlx` | temperature `0.2` |
 | Embeddings | `embeddinggemma` | 768 dimensions |
 
-The three chat adapters use explicit JSON-schema output, Pydantic validation, and one bounded repair attempt. Their model aliases are independently overrideable in `.env`.
+The three chat adapters use explicit JSON-schema output, Pydantic validation, and one bounded repair attempt. Provider and model selection are not overridden through `.env`: change the relevant task in `models.yaml`, then run `make prepare`. Changing only the classification model, for example, means editing only `models.classification`.
 
 The policy index is a generated sqlite-vec database over section-aware chunks from [`policies/`](policies/). Its compatibility manifest records the embedding identity, dimensions, preprocessing/chunking settings, and corpus hash. Run `make rebuild`:
 
@@ -309,6 +313,16 @@ The policy index is a generated sqlite-vec database over section-aware chunks fr
 - after changing policy preprocessing or chunking.
 
 Changing the reporting model or deterministic review rules alone does not invalidate the index.
+
+### Preparation gate
+
+`make prepare` is the explicit fail-early boundary before a review. It validates the YAML configuration, required writable storage, supported provider adapters, provider connectivity, every task's configured model and digest, and policy-index compatibility. A critical failure exits non-zero with safe remediation and prevents startup. `make start` runs the same gate automatically, so starting the CLI directly cannot bypass readiness checks.
+
+Startup preparation stays lightweight: it verifies provider inventory/access rather than loading a 12B model and running inference on every restart. Use `make smoke` after installing or changing a model to exercise real classification, extraction, embedding, and reporting calls.
+
+MLflow is intentionally different: it is optional for interactive reviews, so an unavailable tracing server produces a warning and runtime tracing degrades safely. Evaluation requires complete telemetry and fails closed if MLflow is disabled, unavailable, or fails during the run.
+
+V1 implements Ollama adapters only. If a cloud adapter is added later, its provider/model/deployment identity belongs in `models.yaml`, while API keys and tokens belong in environment variables or a secret store—not in version control. Its preparation checker should validate credential presence, authentication, connectivity, and deployment access without printing secret values.
 
 ### Durable state and recovery
 
@@ -454,9 +468,10 @@ Run `make help` for the canonical local command list.
 | Command | When to use it |
 | --- | --- |
 | `make setup` | First clone or whenever `uv.lock` changes |
-| `make doctor` | Check Ollama models/digests, policy-index compatibility, and MLflow availability |
+| `make prepare` | Run the full fail-early readiness gate and show each result |
+| `make doctor` | Compatibility alias for `make prepare` |
 | `make rebuild` | Fresh clone or policy/embedding/index-profile change |
-| `make start` | Run preflight checks, then start the API and UI |
+| `make start` | Run preparation, then start the API and UI |
 | `make mlflow` | Start local tracing on port 5001; required during evaluation |
 | `make smoke` | Exercise every configured Ollama task adapter |
 | `make generate-data` | Deliberately regenerate the 20 deterministic bundles |
@@ -481,6 +496,7 @@ app/
 ├── graph/          # LangGraph nodes, routing, interrupts, resume
 ├── observability/  # MLflow/no-op tracing boundary
 ├── persistence/    # SQLite repositories, migrations, queue, artifacts
+├── preparation/    # Startup readiness, provider probes, safe diagnostics
 ├── retrieval/      # Policy indexing and sqlite-vec retrieval
 └── review/         # Deterministic rules, decisions, report validation
 config/             # Task models and review rules

@@ -7,6 +7,7 @@ import pytest
 from app.ai.classification.service import LLMDocumentClassifier
 from app.ai.config import ChatModelConfig, load_models_config
 from app.ai.extraction.service import LLMFieldExtractor
+from app.ai.models import LangChainEmbeddingProvider
 from app.ai.models.factory import create_chat_model
 from app.ai.reporting.service import LLMReportComposer
 from app.domain import (
@@ -52,6 +53,28 @@ class StubChatModel:
         return self.runnable
 
 
+class StubAsyncClient:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class StubSyncClient:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class CloseableEmbeddings:
+    def __init__(self) -> None:
+        self._async_client = StubAsyncClient()
+        self._client = StubSyncClient()
+
+
 def processed_document() -> ProcessedDocument:
     return ProcessedDocument(
         document_id="doc-1",
@@ -67,6 +90,22 @@ def processed_document() -> ProcessedDocument:
         ],
         processor_metadata=ProcessorMetadata(processor="test"),
     )
+
+
+@pytest.mark.asyncio
+async def test_embedding_adapter_closes_provider_http_clients() -> None:
+    embeddings = CloseableEmbeddings()
+    provider = LangChainEmbeddingProvider(
+        embeddings,  # type: ignore[arg-type]
+        provider="test",
+        model="test-embedding",
+        dimensions=8,
+    )
+
+    await provider.aclose()
+
+    assert embeddings._async_client.closed
+    assert embeddings._client.closed
 
 
 @pytest.mark.asyncio
@@ -427,45 +466,30 @@ async def test_report_retries_invented_reference_and_imposes_canonical_values() 
     assert report.sections[0].finding_ids == ["finding-missing-financial"]
 
 
-def test_model_registry_defaults_and_overrides() -> None:
+def test_model_registry_uses_yaml_model_identity_and_endpoint_override() -> None:
     root = Path(__file__).parents[2]
 
     config = load_models_config(
         root / "config/models.yaml",
-        extraction_model="local-extraction-override",
         ollama_base_url="http://ollama.test:11434",
     )
 
     assert config.classification.model == "gemma4:12b-mlx"
-    assert config.extraction.model == "local-extraction-override"
+    assert config.extraction.model == "gemma4:12b-mlx"
     assert config.reporting.model == "gemma4:12b-mlx"
     assert config.embeddings.model == "embeddinggemma"
+    assert config.classification.model_digest is not None
+    assert config.extraction.model_digest is not None
+    assert config.reporting.model_digest is not None
     assert config.embeddings.model_digest is not None
     assert config.embeddings.dimensions == 768
     assert config.classification.base_url == "http://ollama.test:11434"
+    assert config.extraction.base_url == "http://ollama.test:11434"
+    assert config.reporting.base_url == "http://ollama.test:11434"
+    assert config.embeddings.base_url == "http://ollama.test:11434"
     assert config.classification.timeout_seconds == 300
     assert config.extraction.timeout_seconds == 600
     assert config.reporting.timeout_seconds == 600
-
-
-def test_same_model_override_preserves_digest_and_changed_model_clears_it() -> None:
-    root = Path(__file__).parents[2]
-
-    same = load_models_config(
-        root / "config/models.yaml",
-        classification_model="gemma4:12b-mlx",
-        embedding_model="embeddinggemma",
-    )
-    changed = load_models_config(
-        root / "config/models.yaml",
-        classification_model="another-chat-model",
-        embedding_model="another-embedding-model",
-    )
-
-    assert same.classification.model_digest is not None
-    assert same.embeddings.model_digest is not None
-    assert changed.classification.model_digest is None
-    assert changed.embeddings.model_digest is None
 
 
 def test_unsupported_chat_provider_fails_without_fallback() -> None:

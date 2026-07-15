@@ -7,6 +7,7 @@ from typing import Any
 import mlflow
 
 from app import cli
+from app.preparation import PreparationMode, PreparationReport
 
 
 class _HealthyTracer:
@@ -32,8 +33,17 @@ def test_evaluate_removes_progress_only_after_mlflow_logging(
         mlflow_tracking_uri="file:///unused",
     )
 
-    monkeypatch.setattr(cli, "_settings_and_models", lambda: (settings, object()))
-    monkeypatch.setattr(cli, "_require_ollama", lambda *_args: None)
+    models = object()
+
+    def prepare(mode: PreparationMode) -> tuple[object, object, PreparationReport]:
+        assert mode is PreparationMode.EVALUATION
+        return (
+            settings,
+            models,
+            PreparationReport.from_results(PreparationMode.EVALUATION, ()),
+        )
+
+    monkeypatch.setattr(cli, "_prepare_or_exit", prepare)
     monkeypatch.setattr(cli, "MlflowTracer", _HealthyTracer)
 
     async def fake_run_real_evaluation(

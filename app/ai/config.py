@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ModelProvider = Literal["ollama", "openai", "azure_openai"]
 EmbeddingProviderName = Literal["ollama", "openai", "azure_openai", "huggingface"]
+MODELS_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
 
 
 class ChatModelConfig(BaseModel):
@@ -50,57 +51,20 @@ class _ModelsFile(BaseModel):
 
 
 def load_models_config(
-    path: Path,
+    path: Path = MODELS_CONFIG_PATH,
     *,
-    classification_model: str | None = None,
-    extraction_model: str | None = None,
-    reporting_model: str | None = None,
-    embedding_model: str | None = None,
     ollama_base_url: str | None = None,
 ) -> ModelsConfig:
-    """Load and validate the registry, applying explicit environment overrides.
+    """Load the canonical model registry and apply an infrastructure override.
 
-    Environment access remains in application settings/bootstrap. Keeping this
-    function explicit makes configuration deterministic in tests and CLIs.
+    Provider and model identities always come from the YAML registry. The
+    optional Ollama base URL changes only where that provider is reached; it
+    cannot replace a configured provider, model name, or digest.
     """
 
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     parsed = _ModelsFile.model_validate(payload)
     config = parsed.models.model_copy(deep=True)
-
-    overrides = {
-        "classification": classification_model,
-        "extraction": extraction_model,
-        "reporting": reporting_model,
-    }
-    for task, model_name in overrides.items():
-        if model_name:
-            task_config = getattr(config, task)
-            setattr(
-                config,
-                task,
-                task_config.model_copy(
-                    update={
-                        "model": model_name,
-                        "model_digest": (
-                            task_config.model_digest
-                            if model_name == task_config.model
-                            else None
-                        ),
-                    }
-                ),
-            )
-    if embedding_model:
-        config.embeddings = config.embeddings.model_copy(
-            update={
-                "model": embedding_model,
-                "model_digest": (
-                    config.embeddings.model_digest
-                    if embedding_model == config.embeddings.model
-                    else None
-                ),
-            }
-        )
 
     if ollama_base_url:
         for task in ("classification", "extraction", "reporting"):

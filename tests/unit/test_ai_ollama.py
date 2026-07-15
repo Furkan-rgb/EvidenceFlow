@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -12,6 +11,7 @@ from app.ai.config import load_models_config
 from app.ai.extraction.service import LLMFieldExtractor
 from app.ai.models.factory import create_chat_model, create_embedding_provider
 from app.ai.reporting.service import LLMReportComposer
+from app.config import Settings
 from app.domain import (
     DocumentType,
     PageContent,
@@ -31,13 +31,14 @@ pytestmark = [
 ]
 
 
-def model_config_path() -> Path:
-    return Path(__file__).parents[2] / "config/models.yaml"
+def configured_models():
+    settings = Settings()
+    return load_models_config(ollama_base_url=settings.ollama_base_url)
 
 
 @pytest.mark.asyncio
 async def test_configured_chat_model_supports_domain_structured_output() -> None:
-    config = load_models_config(model_config_path())
+    config = configured_models()
     classifier = LLMDocumentClassifier(create_chat_model(config.classification))
     document = ProcessedDocument(
         document_id="ollama-smoke-application",
@@ -63,7 +64,7 @@ async def test_configured_chat_model_supports_domain_structured_output() -> None
 
 @pytest.mark.asyncio
 async def test_configured_embedding_model_has_manifest_dimensions() -> None:
-    config = load_models_config(model_config_path())
+    config = configured_models()
     provider = create_embedding_provider(config.embeddings)
 
     vector = await provider.embed_query("company registration evidence")
@@ -73,7 +74,7 @@ async def test_configured_embedding_model_has_manifest_dimensions() -> None:
 
 @pytest.mark.asyncio
 async def test_configured_extraction_and_reporting_schemas() -> None:
-    config = load_models_config(model_config_path())
+    config = configured_models()
     document = ProcessedDocument(
         document_id="ollama-smoke-extraction",
         filename="application.pdf",

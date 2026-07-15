@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import URLError
-from urllib.request import urlopen
 
 import aiosqlite
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -22,34 +17,29 @@ from app.ai import (
     LLMReportComposer,
 )
 from app.ai.config import ModelsConfig, load_models_config
-from app.ai.models import create_chat_model, create_embedding_provider
+from app.ai.models import (
+    LangChainEmbeddingProvider,
+    create_chat_model,
+    create_embedding_provider,
+)
 from app.config import Settings
 from app.documents import PyMuPDFDocumentProcessor
-from app.errors import EmbeddingIndexMismatchError, PolicyIndexMissingError
 from app.graph import WorkflowDependencies, build_review_graph
 from app.observability import MlflowTracer, NoOpTracer, Tracer
 from app.persistence import LocalArtifactStore, SQLiteReviewRepository
 from app.ports import ArtifactStore, ReviewRepository
+from app.preparation import (
+    PreparationBlockedError,
+    PreparationComponent,
+    PreparationMode,
+    PreparationReport,
+    failed_result,
+    prepare_application,
+    require_prepared,
+)
 from app.retrieval import SqliteVecPolicyRetriever
 from app.review import load_review_rules
 from app.runner import WorkflowRunner
-
-logger = logging.getLogger(__name__)
-
-
-class UnavailablePolicyRetriever:
-    """Deferred startup failure that keeps health and indexing endpoints usable."""
-
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-
-    async def search(self, query: str, *, limit: int = 5) -> list[Any]:
-        del query, limit
-        if isinstance(self.error, PolicyIndexMissingError):
-            raise self.error
-        raise PolicyIndexMissingError(
-            "The policy index is unavailable; rebuild it before reviewing documents."
-        ) from self.error
 
 
 @dataclass(slots=True)
@@ -63,28 +53,7 @@ class ApplicationContainer:
     tracer: Tracer
     policy_index_healthy: bool
     model_runtime_healthy: bool
-
-
-def _model_names(models: ModelsConfig) -> set[str]:
-    return {
-        models.classification.model,
-        models.extraction.model,
-        models.reporting.model,
-        models.embeddings.model,
-    }
-
-
-def model_digests(models: ModelsConfig) -> dict[str, str]:
-    return {
-        config.model: config.model_digest
-        for config in (
-            models.classification,
-            models.extraction,
-            models.reporting,
-            models.embeddings,
-        )
-        if config.model_digest is not None
-    }
+    preparation_report: PreparationReport
 
 
 def model_task_metadata(
@@ -108,42 +77,6 @@ def model_task_metadata(
     return result
 
 
-def _ollama_inventory_sync(base_url: str) -> dict[str, str]:
-    try:
-        with urlopen(f"{base_url.rstrip('/')}/api/tags", timeout=2.0) as response:
-            payload = json.load(response)
-    except (OSError, URLError, ValueError, json.JSONDecodeError):
-        return {}
-    inventory: dict[str, str] = {}
-    for item in payload.get("models", []):
-        if not isinstance(item, dict) or not item.get("name") or not item.get("digest"):
-            continue
-        name = str(item["name"])
-        digest = str(item["digest"])
-        inventory[name] = digest
-        if name.endswith(":latest"):
-            inventory[name.removesuffix(":latest")] = digest
-    return inventory
-
-
-async def ollama_inventory(base_url: str) -> dict[str, str]:
-    return await asyncio.to_thread(_ollama_inventory_sync, base_url)
-
-
-async def probe_ollama(
-    base_url: str,
-    required: set[str],
-    expected_digests: Mapping[str, str] | None = None,
-) -> bool:
-    inventory = await ollama_inventory(base_url)
-    if not required <= set(inventory):
-        return False
-    return all(
-        inventory.get(model) == digest
-        for model, digest in dict(expected_digests or {}).items()
-    )
-
-
 def _build_tracer(settings: Settings) -> Tracer:
     if not settings.mlflow_enabled:
         return NoOpTracer()
@@ -156,51 +89,48 @@ async def application_container(
 ) -> AsyncIterator[ApplicationContainer]:
     """Create and cleanly stop all long-lived local resources."""
 
-    settings = settings or Settings()
-    settings.ensure_directories()
-    models = load_models_config(
-        settings.models_config,
-        classification_model=settings.classification_model,
-        extraction_model=settings.extraction_model,
-        reporting_model=settings.reporting_model,
-        embedding_model=settings.embedding_model,
-        ollama_base_url=settings.ollama_base_url,
+    try:
+        settings = settings or Settings()
+        models = load_models_config(
+            ollama_base_url=settings.ollama_base_url,
+        )
+    except Exception:
+        configuration_report = PreparationReport.from_results(
+            PreparationMode.RUNTIME,
+            (
+                failed_result(
+                    mode=PreparationMode.RUNTIME,
+                    code="configuration_invalid",
+                    component=PreparationComponent.CONFIGURATION,
+                    message="Runtime settings or the model registry are invalid.",
+                    remediation="Correct the runtime settings or config/models.yaml.",
+                ),
+            ),
+        )
+        raise PreparationBlockedError(configuration_report) from None
+    preparation_report = await prepare_application(
+        settings,
+        models,
+        mode=PreparationMode.RUNTIME,
     )
+    require_prepared(preparation_report)
+
     rules = load_review_rules(settings.rules_config)
     repository = SQLiteReviewRepository(settings.database_path)
     await repository.migrate()
     artifact_store = LocalArtifactStore(settings.uploads_dir, settings.exports_dir)
     tracer = _build_tracer(settings)
 
-    inventory = await ollama_inventory(settings.ollama_base_url)
-    expected_digests = model_digests(models)
-    model_runtime_healthy = _model_names(models) <= set(inventory) and all(
-        inventory.get(model) == digest
-        for model, digest in expected_digests.items()
-    )
-
-    classifier = LLMDocumentClassifier(create_chat_model(models.classification))
-    extractor = LLMFieldExtractor(create_chat_model(models.extraction))
-    composer = LLMReportComposer(create_chat_model(models.reporting))
-    embedder = create_embedding_provider(models.embeddings)
-    policy_index_healthy = True
+    retriever: SqliteVecPolicyRetriever | None = None
+    embedder: LangChainEmbeddingProvider | None = None
+    checkpoint_connection: aiosqlite.Connection | None = None
+    runner: WorkflowRunner | None = None
     try:
-        observed_embedding_digest = inventory.get(models.embeddings.model)
-        if (
-            observed_embedding_digest is not None
-            and models.embeddings.model_digest is not None
-            and observed_embedding_digest != models.embeddings.model_digest
-        ):
-            raise EmbeddingIndexMismatchError(
-                "The running embedding model digest differs from the configured "
-                "policy index identity; rebuild with the intended model.",
-                details={
-                    "model": models.embeddings.model,
-                    "expected_digest": models.embeddings.model_digest,
-                    "observed_digest": observed_embedding_digest,
-                },
-            )
-        retriever: Any = SqliteVecPolicyRetriever(
+        classifier = LLMDocumentClassifier(create_chat_model(models.classification))
+        extractor = LLMFieldExtractor(create_chat_model(models.extraction))
+        composer = LLMReportComposer(create_chat_model(models.reporting))
+        embedder = create_embedding_provider(models.embeddings)
+        retriever = SqliteVecPolicyRetriever(
             embedder,
             dimensions=models.embeddings.dimensions,
             index_path=settings.policy_index_path,
@@ -208,52 +138,54 @@ async def application_container(
             model_digest=models.embeddings.model_digest,
             policies_dir=settings.policies_dir,
         )
-    except Exception as error:
-        logger.warning("Policy retrieval is unavailable at startup: %s", error)
-        retriever = UnavailablePolicyRetriever(error)
-        policy_index_healthy = False
-
-    checkpoint_connection = await aiosqlite.connect(settings.checkpoints_path)
-    checkpointer = AsyncSqliteSaver(
-        checkpoint_connection,
-        serde=JsonPlusSerializer(pickle_fallback=False),
-    )
-    await checkpointer.setup()
-    graph = build_review_graph(
-        WorkflowDependencies(
-            processor=PyMuPDFDocumentProcessor(
-                artifact_store, max_pages=settings.max_pages
+        checkpoint_connection = await aiosqlite.connect(settings.checkpoints_path)
+        checkpointer = AsyncSqliteSaver(
+            checkpoint_connection,
+            serde=JsonPlusSerializer(pickle_fallback=False),
+        )
+        await checkpointer.setup()
+        graph = build_review_graph(
+            WorkflowDependencies(
+                processor=PyMuPDFDocumentProcessor(
+                    artifact_store, max_pages=settings.max_pages
+                ),
+                classifier=classifier,
+                extractor=extractor,
+                retriever=retriever,
+                report_composer=composer,
+                rules=rules,
+                tracer=tracer,
+                task_metadata=model_task_metadata(models),
             ),
-            classifier=classifier,
-            extractor=extractor,
-            retriever=retriever,
-            report_composer=composer,
-            rules=rules,
+            checkpointer=checkpointer,
+        )
+        runner = WorkflowRunner(
+            repository,
+            graph,
+            tracer,
+            log_sensitive_content=settings.log_sensitive_content,
+        )
+        container = ApplicationContainer(
+            settings=settings,
+            models=models,
+            repository=repository,
+            artifact_store=artifact_store,
+            graph=graph,
+            runner=runner,
             tracer=tracer,
-            task_metadata=model_task_metadata(models),
-        ),
-        checkpointer=checkpointer,
-    )
-    runner = WorkflowRunner(
-        repository,
-        graph,
-        tracer,
-        log_sensitive_content=settings.log_sensitive_content,
-    )
-    container = ApplicationContainer(
-        settings=settings,
-        models=models,
-        repository=repository,
-        artifact_store=artifact_store,
-        graph=graph,
-        runner=runner,
-        tracer=tracer,
-        policy_index_healthy=policy_index_healthy,
-        model_runtime_healthy=model_runtime_healthy,
-    )
-    await runner.start()
-    try:
+            policy_index_healthy=True,
+            model_runtime_healthy=True,
+            preparation_report=preparation_report,
+        )
+        await runner.start()
         yield container
     finally:
-        await runner.stop()
-        await checkpoint_connection.close()
+        if runner is not None:
+            await runner.stop()
+        if retriever is not None:
+            with suppress(Exception):
+                retriever.close()
+        if embedder is not None:
+            await embedder.aclose()
+        if checkpoint_connection is not None:
+            await checkpoint_connection.close()

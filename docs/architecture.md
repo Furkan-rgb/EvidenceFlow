@@ -201,6 +201,27 @@ Rebuild after policy content, embedder identity/digest/dimensions,
 preprocessing, or chunk-setting changes. Chat-model or deterministic-rule
 changes do not invalidate existing policy vectors.
 
+## Configuration and preparation boundary
+
+[`config/models.yaml`](../config/models.yaml) is the canonical configuration for each
+AI task's provider, model identity, digest, default endpoint, and task-specific
+settings. Model selection is not duplicated in `.env`. Environment variables and the
+optional ignored `.env` are limited to operational settings such as local paths,
+limits, telemetry, and future provider secrets.
+
+Before startup, one preparation flow validates typed configuration, writable storage,
+implemented provider adapters, provider connectivity, task model availability and
+digests, and policy-index compatibility. Critical checks fail startup with a safe
+diagnostic. MLflow availability is a warning for the interactive runtime because
+tracing is fail-open; evaluation separately requires tracing to remain healthy and
+fails closed.
+
+V1 implements only the Ollama provider adapter. A future cloud adapter would add its
+own readiness checker: model/deployment identity would remain in `models.yaml`, while
+credentials would come from the environment or a secret store. The checker would
+validate authentication and deployment access without returning credential values in
+logs or errors.
+
 ## MLflow semantics
 
 MLflow sits behind `Tracer`/`Span` protocols. Runtime spans cover

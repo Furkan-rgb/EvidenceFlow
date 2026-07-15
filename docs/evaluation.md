@@ -83,7 +83,7 @@ Keep MLflow running in its own terminal. Then run:
 make evaluate
 ```
 
-`make evaluate` runs the dependency doctor before invoking the real benchmark. The explicit evaluation command is:
+`make evaluate` runs the preparation gate before invoking the real benchmark. The explicit evaluation command is:
 
 ```bash
 uv run python -m app.cli evaluate \
