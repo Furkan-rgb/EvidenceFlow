@@ -1,0 +1,34 @@
+models:
+  classification:
+    provider: ollama
+    model: gemma4:12b-mlx
+    model_digest: 197a75677efb4b634352a8bdf24fd4781f1ea2c0b0c11f2b391ea7e0fcdcf01c
+    temperature: 0.0
+    max_output_tokens: 512
+    timeout_seconds: 300
+    base_url: http://localhost:11434
+
+  extraction:
+    provider: ollama
+    model: gemma4:12b-mlx
+    model_digest: 197a75677efb4b634352a8bdf24fd4781f1ea2c0b0c11f2b391ea7e0fcdcf01c
+    temperature: 0.0
+    max_output_tokens: 2048
+    timeout_seconds: 600
+    base_url: http://localhost:11434
+
+  reporting:
+    provider: ollama
+    model: gemma4:12b-mlx
+    model_digest: 197a75677efb4b634352a8bdf24fd4781f1ea2c0b0c11f2b391ea7e0fcdcf01c
+    temperature: 0.2
+    max_output_tokens: 2048
+    timeout_seconds: 600
+    base_url: http://localhost:11434
+
+  embeddings:
+    provider: ollama
+    model: embeddinggemma
+    model_digest: 85462619ee721b466c5927d109d4cb765861907d5417b9109caebc4e614679f1
+    dimensions: 768
+    base_url: http://localhost:11434
