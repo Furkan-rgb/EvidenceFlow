@@ -1,0 +1,117 @@
+{
+  "bundle_id": "bundle_008",
+  "category": "registration_number_conflict",
+  "description": "The application and register extract contain different registration numbers.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 2350000",
+          "value": "2350000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Gable Foods B.V.",
+          "value": "Gable Foods B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Number of employees: 42",
+          "value": 42
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 12345678",
+          "value": "12345678"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Gable Foods B.V.",
+          "value": "Gable Foods B.V."
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 12345687",
+          "value": "12345687"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 2350000",
+          "value": "2350000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Gable Foods B.V.",
+          "value": "Gable Foods B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 42",
+          "value": 42
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    }
+  ],
+  "expected_conflicts": [
+    "registration_number"
+  ],
+  "expected_findings": [
+    {
+      "field": "registration_number",
+      "severity": "high",
+      "type": "field_conflict"
+    }
+  ],
+  "expected_review_routing": {
+    "reasons": [
+      "conflict:registration_number"
+    ],
+    "required": true
+  },
+  "expected_status_before_review": "needs_follow_up",
+  "metadata": {},
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

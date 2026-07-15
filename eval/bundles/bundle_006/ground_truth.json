@@ -1,0 +1,109 @@
+{
+  "bundle_id": "bundle_006",
+  "category": "missing_required_document",
+  "description": "A package missing its required company_extract.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 3100000",
+          "value": "3100000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Elm City Trading B.V.",
+          "value": "Elm City Trading B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Number of employees: 38",
+          "value": 38
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 61449022",
+          "value": "61449022"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 3100000",
+          "value": "3100000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Elm City Trading B.V.",
+          "value": "Elm City Trading B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 38",
+          "value": 38
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "supporting_correspondence",
+      "expected_clarification_statements": [
+        {
+          "page_number": 1,
+          "source_text": "Clarification: The registered and operating addresses are the same.",
+          "text": "The registered and operating addresses are the same.",
+          "topic": "operating_address",
+          "value": null
+        }
+      ],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Re: onboarding clarification for Elm City Trading B.V.",
+          "value": "Elm City Trading B.V."
+        }
+      },
+      "file_name": "supporting_correspondence.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [
+    {
+      "document_type": "company_extract",
+      "severity": "high",
+      "type": "missing_document"
+    }
+  ],
+  "expected_review_routing": {
+    "reasons": [],
+    "required": false
+  },
+  "expected_status_before_review": "incomplete",
+  "metadata": {},
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

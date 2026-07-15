@@ -1,0 +1,129 @@
+{
+  "bundle_id": "bundle_004",
+  "category": "complete_consistent",
+  "description": "A complete package whose required values agree across documents.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 12600000",
+          "value": "12600000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Cedarworks Europe B.V.",
+          "value": "Cedarworks Europe B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Number of employees: 154",
+          "value": 154
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 44712009",
+          "value": "44712009"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Cedarworks Europe B.V.",
+          "value": "Cedarworks Europe B.V."
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 44712009",
+          "value": "44712009"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 12600000",
+          "value": "12600000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Cedarworks Europe B.V.",
+          "value": "Cedarworks Europe B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 154",
+          "value": 154
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "supporting_correspondence",
+      "expected_clarification_statements": [
+        {
+          "page_number": 1,
+          "source_text": "Clarification: The registered and operating addresses are the same.",
+          "text": "The registered and operating addresses are the same.",
+          "topic": "operating_address",
+          "value": null
+        }
+      ],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Re: onboarding clarification for Cedarworks Europe B.V.",
+          "value": "Cedarworks Europe B.V."
+        }
+      },
+      "file_name": "supporting_correspondence.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [],
+  "expected_review_routing": {
+    "reasons": [],
+    "required": false
+  },
+  "expected_status_before_review": "complete",
+  "metadata": {},
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

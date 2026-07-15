@@ -1,0 +1,114 @@
+{
+  "bundle_id": "bundle_019",
+  "category": "incomplete_financial_document",
+  "description": "The financial statement is recognised but has no revenue value.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 1480000",
+          "value": "1480000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Pioneer Textiles B.V.",
+          "value": "Pioneer Textiles B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Number of employees: 33",
+          "value": 33
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 99220461",
+          "value": "99220461"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Pioneer Textiles B.V.",
+          "value": "Pioneer Textiles B.V."
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 99220461",
+          "value": "99220461"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": null,
+          "value": null
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Pioneer Textiles B.V.",
+          "value": "Pioneer Textiles B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 33",
+          "value": 33
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [
+    {
+      "document_type": "financial_statement",
+      "field": "annual_revenue_eur",
+      "severity": "high",
+      "type": "missing_required_field"
+    }
+  ],
+  "expected_review_routing": {
+    "reasons": [],
+    "required": false
+  },
+  "expected_status_before_review": "incomplete",
+  "metadata": {},
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

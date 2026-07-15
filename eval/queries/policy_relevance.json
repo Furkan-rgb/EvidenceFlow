@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "queries": [
+    {
+      "query_id": "missing-application",
+      "query": "The business onboarding application form is missing from the submitted package.",
+      "relevant_evidence_ids": [
+        "EFP-ONBOARDING:1.2:chunk-0",
+        "EFP-EVIDENCE:6.1:chunk-0"
+      ]
+    },
+    {
+      "query_id": "missing-company-extract",
+      "query": "No current official company register extract was provided.",
+      "relevant_evidence_ids": [
+        "EFP-ONBOARDING:1.2:chunk-0",
+        "EFP-IDENTIFICATION:3.1:chunk-0"
+      ]
+    },
+    {
+      "query_id": "missing-financial-statement",
+      "query": "The required current financial statement is absent.",
+      "relevant_evidence_ids": [
+        "EFP-FINANCIAL:2.1:chunk-0",
+        "EFP-ONBOARDING:1.2:chunk-0"
+      ]
+    },
+    {
+      "query_id": "registration-conflict",
+      "query": "Registration numbers conflict between the application and company extract.",
+      "relevant_evidence_ids": [
+        "EFP-IDENTIFICATION:3.2:chunk-0",
+        "EFP-MANUAL-REVIEW:5.3:chunk-0"
+      ]
+    },
+    {
+      "query_id": "company-name-conflict",
+      "query": "Legal company names remain inconsistent after normalisation.",
+      "relevant_evidence_ids": [
+        "EFP-IDENTIFICATION:3.3:chunk-0",
+        "EFP-MANUAL-REVIEW:5.3:chunk-0"
+      ]
+    },
+    {
+      "query_id": "revenue-conflict",
+      "query": "Annual revenue differs materially between the application and financial statement.",
+      "relevant_evidence_ids": [
+        "EFP-FINANCIAL:2.2:chunk-0",
+        "EFP-MANUAL-REVIEW:5.3:chunk-0"
+      ]
+    },
+    {
+      "query_id": "low-confidence-field",
+      "query": "An extracted field is below the confidence threshold and needs human verification.",
+      "relevant_evidence_ids": [
+        "EFP-MANUAL-REVIEW:5.2:chunk-0",
+        "EFP-DATA-QUALITY:4.1:chunk-0"
+      ]
+    },
+    {
+      "query_id": "evidence-provenance",
+      "query": "A finding must retain a citation to its source document and page.",
+      "relevant_evidence_ids": [
+        "EFP-EVIDENCE:6.2:chunk-0",
+        "EFP-DATA-QUALITY:4.4:chunk-0"
+      ]
+    }
+  ]
+}

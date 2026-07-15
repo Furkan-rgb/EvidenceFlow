@@ -1,0 +1,109 @@
+{
+  "bundle_id": "bundle_014",
+  "category": "company_name_formatting_variant",
+  "description": "Case, punctuation, ampersand and legal-form presentation should normalise to a match.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 1750000",
+          "value": "1750000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Northstar & Partners B.V.",
+          "value": "Northstar & Partners B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Number of employees: 29",
+          "value": 29
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 44117730",
+          "value": "44117730"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: NORTHSTAR AND PARTNERS BV",
+          "value": "NORTHSTAR AND PARTNERS BV"
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 44117730",
+          "value": "44117730"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 1750000",
+          "value": "1750000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Northstar and Partners B.V.",
+          "value": "Northstar and Partners B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 29",
+          "value": 29
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [],
+  "expected_review_routing": {
+    "reasons": [],
+    "required": false
+  },
+  "expected_status_before_review": "complete",
+  "metadata": {
+    "normalised_company_name": "northstar and partners bv"
+  },
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

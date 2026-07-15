@@ -1,0 +1,103 @@
+{
+  "bundle_id": "bundle_007",
+  "category": "missing_required_document",
+  "description": "A package missing its required application_form.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Fjord Systems B.V.",
+          "value": "Fjord Systems B.V."
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 72990114",
+          "value": "72990114"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 7450000",
+          "value": "7450000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Fjord Systems B.V.",
+          "value": "Fjord Systems B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 81",
+          "value": 81
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "supporting_correspondence",
+      "expected_clarification_statements": [
+        {
+          "page_number": 1,
+          "source_text": "Clarification: The registered and operating addresses are the same.",
+          "text": "The registered and operating addresses are the same.",
+          "topic": "operating_address",
+          "value": null
+        }
+      ],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Re: onboarding clarification for Fjord Systems B.V.",
+          "value": "Fjord Systems B.V."
+        }
+      },
+      "file_name": "supporting_correspondence.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [
+    {
+      "document_type": "application_form",
+      "severity": "high",
+      "type": "missing_document"
+    }
+  ],
+  "expected_review_routing": {
+    "reasons": [],
+    "required": false
+  },
+  "expected_status_before_review": "incomplete",
+  "metadata": {},
+  "reviewer_decisions": [],
+  "schema_version": "1.0"
+}

@@ -1,0 +1,117 @@
+{
+  "bundle_id": "bundle_020",
+  "category": "human_correction",
+  "description": "An unclear employee-count value must be corrected before validation can pass.",
+  "documents": [
+    {
+      "classification_review_required": false,
+      "document_type": "application_form",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Estimated annual revenue: EUR 2800000",
+          "value": "2800000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Quarry Digital B.V.",
+          "value": "Quarry Digital B.V."
+        },
+        "employee_count": {
+          "ambiguous": true,
+          "page_number": 1,
+          "source_text": "Number of employees: 4? (final digit unclear)",
+          "value": 42
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 10993372",
+          "value": "10993372"
+        }
+      },
+      "file_name": "application_form.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "company_extract",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Legal company name: Quarry Digital B.V.",
+          "value": "Quarry Digital B.V."
+        },
+        "incorporation_date": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Date of incorporation: 2017-04-12",
+          "value": "2017-04-12"
+        },
+        "registration_number": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Registration number: 10993372",
+          "value": "10993372"
+        }
+      },
+      "file_name": "company_extract.pdf"
+    },
+    {
+      "classification_review_required": false,
+      "document_type": "financial_statement",
+      "expected_clarification_statements": [],
+      "expected_fields": {
+        "annual_revenue_eur": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Revenue for the reporting year: EUR 2800000",
+          "value": "2800000"
+        },
+        "company_name": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting entity: Quarry Digital B.V.",
+          "value": "Quarry Digital B.V."
+        },
+        "employee_count": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Average employee count at year end: 42",
+          "value": 42
+        },
+        "reporting_year": {
+          "ambiguous": false,
+          "page_number": 1,
+          "source_text": "Reporting year: 2025",
+          "value": 2025
+        }
+      },
+      "file_name": "financial_statement.pdf"
+    }
+  ],
+  "expected_conflicts": [],
+  "expected_findings": [],
+  "expected_review_routing": {
+    "reasons": [
+      "low_confidence:employee_count"
+    ],
+    "required": true
+  },
+  "expected_status_before_review": "complete",
+  "metadata": {
+    "expected_status_after_review": "complete"
+  },
+  "reviewer_decisions": [
+    {
+      "action": "correct",
+      "field": "employee_count",
+      "value": 42
+    }
+  ],
+  "schema_version": "1.0"
+}
