@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   currentProgressStep,
+  nextProgressStep,
   processingSignature,
   progressTransitionAnnouncement,
   workflowSteps,
@@ -23,6 +25,11 @@ const EXTRACTION_PROGRESS = {
     { id: "report_composition", status: "upcoming" },
   ],
 };
+
+const PROCESSING_STYLES = readFileSync(
+  new URL("../../frontend/css/app.css", import.meta.url),
+  "utf8",
+);
 
 function processingMarkup(review) {
   const previousDocument = globalThis.document;
@@ -80,6 +87,7 @@ test("preserves API states while allowing exactly one declared current step", ()
   assert.equal(steps.find(({ id }) => id === "extraction").status, "current");
   assert.equal(steps.find(({ id }) => id === "cross_check").status, "upcoming");
   assert.equal(currentProgressStep(progress).id, "extraction");
+  assert.equal(nextProgressStep(progress).id, "completeness");
   assert.equal(steps.some(({ id }) => id === "untrusted_stage"), false);
 });
 
@@ -96,26 +104,37 @@ test("renders an accessible current, completed, and upcoming tracker", () => {
     },
   });
 
-  assert.match(markup, /<ol class="workflow-steps" role="list">/);
+  assert.match(markup, /<ol class="workflow-steps" role="list" aria-label="Review workflow stages">/);
   assert.equal((markup.match(/aria-current="step"/g) || []).length, 1);
   assert.match(markup, /data-status="completed"/);
   assert.match(markup, /data-status="current"/);
   assert.match(markup, /data-status="upcoming"/);
-  assert.match(markup, />Done<\/span>/);
-  assert.match(markup, />Working<\/span>/);
-  assert.match(markup, />Coming up<\/span>/);
+  assert.match(markup, />Completed<\/span>/);
+  assert.match(markup, />In progress<\/span>/);
+  assert.match(markup, />Upcoming<\/span>/);
   assert.match(markup, /Step 3 of 7/);
-  assert.match(markup, /Extracting required fields…/);
+  assert.match(markup, /<h1 id="processing-heading">Extract required fields<\/h1>/);
+  assert.match(markup, /<strong>Next:<\/strong> Normalize and check completeness/);
+  assert.match(markup, /2 completed · 1 in progress · 4 upcoming/);
+  assert.match(markup, /<dl class="processing-stats">/);
+  assert.match(markup, /<dt>Fields extracted<\/dt><dd>Working…<\/dd>/);
+  assert.match(markup, /<dt>Findings so far<\/dt><dd>Not checked<\/dd>/);
   assert.doesNotMatch(markup, /untrusted_stage|<img src=x>/);
+});
+
+test("gives completed, current, and upcoming rows distinct full-row styles", () => {
+  assert.match(PROCESSING_STYLES, /\.workflow-step\[data-status="completed"\]\s*\{/);
+  assert.match(PROCESSING_STYLES, /\.workflow-step\[data-status="current"\]\s*\{/);
+  assert.match(PROCESSING_STYLES, /\.workflow-step\[data-status="upcoming"\]\s*\{/);
 });
 
 test("shows an honest loading state until authoritative progress arrives", () => {
   const markup = processingMarkup({ review_id: "review-loading" });
 
-  assert.match(markup, /<h1 id="processing-heading">Loading review…<\/h1>/);
-  assert.match(markup, /Waiting for progress data/);
+  assert.match(markup, /<h1 id="processing-heading">Preparing the review…<\/h1>/);
+  assert.match(markup, /Fetching the latest saved workflow state/);
   assert.doesNotMatch(markup, /aria-current="step"/);
-  assert.equal((markup.match(/>Coming up<\/span>/g) || []).length, 7);
+  assert.doesNotMatch(markup, /workflow-steps|processing-stats|Not started|Not checked/);
 });
 
 test("explicit zero summary counts override stale fallback arrays", () => {
@@ -133,10 +152,10 @@ test("explicit zero summary counts override stale fallback arrays", () => {
     pending_reviews: [{}, {}],
   });
 
-  assert.match(markup, /<strong>0<\/strong><span>documents classified<\/span>/);
-  assert.match(markup, /<strong>0<\/strong><span>fields extracted<\/span>/);
-  assert.match(markup, /<strong>0<\/strong><span>findings identified<\/span>/);
-  assert.match(markup, /<strong>0<\/strong><span>items need review<\/span>/);
+  assert.match(markup, /<dt>Documents classified<\/dt><dd>0<\/dd>/);
+  assert.match(markup, /<dt>Fields extracted<\/dt><dd>Working…<\/dd>/);
+  assert.match(markup, /<dt>Findings so far<\/dt><dd>Not checked<\/dd>/);
+  assert.doesNotMatch(markup, /items need review/);
 });
 
 test("processing signatures react to progress and summary, but not revision", () => {
@@ -173,7 +192,11 @@ test("processing signatures react to progress and summary, but not revision", ()
 test("announces only real step transitions", () => {
   assert.equal(
     progressTransitionAnnouncement(null, EXTRACTION_PROGRESS),
-    "Now working on step 3 of 7: Extract required fields.",
+    "Now on step 3 of 7: Extract required fields.",
+  );
+  assert.equal(
+    progressTransitionAnnouncement("classification", EXTRACTION_PROGRESS),
+    "Classify documents completed. Now on step 3 of 7: Extract required fields.",
   );
   assert.equal(progressTransitionAnnouncement("extraction", EXTRACTION_PROGRESS), null);
   assert.equal(progressTransitionAnnouncement(null, null), null);

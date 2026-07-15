@@ -80,10 +80,21 @@ export function currentProgressStep(progress) {
   return workflowSteps(progress).find((step) => step.status === "current") || null;
 }
 
+export function nextProgressStep(progress) {
+  const steps = workflowSteps(progress);
+  const currentIndex = steps.findIndex((step) => step.status === "current");
+  if (currentIndex < 0) return null;
+  return steps.slice(currentIndex + 1).find((step) => step.status === "upcoming") || null;
+}
+
 export function progressTransitionAnnouncement(previousStepId, progress) {
   const current = currentProgressStep(progress);
   if (!current || current.id === previousStepId) return null;
-  return `Now working on step ${current.position} of ${WORKFLOW_STEPS.length}: ${current.label}.`;
+  const previous = STEP_BY_ID.get(previousStepId);
+  const completed = previous && WORKFLOW_STEPS.indexOf(previous) < current.position - 1
+    ? `${previous.label} completed. `
+    : "";
+  return `${completed}Now on step ${current.position} of ${WORKFLOW_STEPS.length}: ${current.label}.`;
 }
 
 function sortedSummaryEntries(summary) {
