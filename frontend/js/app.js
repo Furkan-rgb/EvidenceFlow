@@ -1,6 +1,11 @@
 import { createReview, getReport, getReview, resumeReview } from "./api.js";
+import {
+  currentProgressStep,
+  processingSignature,
+  progressTransitionAnnouncement,
+} from "./progress-data.js";
 import { clearRoute, reviewIdFromHash, setReviewRoute } from "./router.js";
-import { resetState, state, updateState } from "./state.js";
+import { resetState, resumedReviewState, state, updateState } from "./state.js";
 import { renderProcessing } from "./views/processing.js";
 import { renderReport } from "./views/report.js";
 import { renderReview } from "./views/review.js";
@@ -11,6 +16,8 @@ const app = document.querySelector("#app");
 const liveRegion = document.querySelector("#live-region");
 let pollTimer = null;
 let routeGeneration = 0;
+let renderedProcessingSignature = null;
+let announcedProgressStepId = null;
 
 function announce(message) {
   liveRegion.textContent = "";
@@ -32,6 +39,26 @@ function show(content, { focus = true } = {}) {
   }
 }
 
+function resetProcessingTracking() {
+  renderedProcessingSignature = null;
+  announcedProgressStepId = null;
+}
+
+function showProcessing(review, { focus = false, announceStage = false, force = false } = {}) {
+  const signature = processingSignature(review);
+  if (force || signature !== renderedProcessingSignature) {
+    show(renderProcessing(review), { focus });
+    renderedProcessingSignature = signature;
+  }
+
+  const current = currentProgressStep(review.progress);
+  if (announceStage) {
+    const message = progressTransitionAnnouncement(announcedProgressStepId, review.progress);
+    if (message) announce(message);
+  }
+  if (current) announcedProgressStepId = current.id;
+}
+
 function stopPolling() {
   if (pollTimer !== null) window.clearTimeout(pollTimer);
   pollTimer = null;
@@ -39,6 +66,7 @@ function stopPolling() {
 
 function showFatal(title, message, { allowRetry = true } = {}) {
   stopPolling();
+  resetProcessingTracking();
   const panel = document.createElement("section");
   panel.className = "fatal-panel panel";
   const heading = document.createElement("h1");
@@ -61,12 +89,14 @@ function showFatal(title, message, { allowRetry = true } = {}) {
 
 function showUpload() {
   stopPolling();
+  resetProcessingTracking();
   resetState();
   const upload = renderUpload({
     onStart: async (files) => {
       const created = await createReview(files);
-      updateState({ reviewId: created.review_id, status: created.status, review: created });
-      show(renderProcessing({ ...created, summary: { document_count: files.length } }));
+      const initialReview = { ...created, summary: { document_count: files.length } };
+      updateState({ reviewId: created.review_id, status: created.status, review: initialReview });
+      showProcessing(initialReview, { focus: true });
       setDocumentTitle("Processing");
       announce("Upload accepted. Review processing has started.");
       setReviewRoute(created.review_id);
@@ -81,19 +111,21 @@ async function renderCurrentReview(review, generation) {
   const status = review.status;
   updateState({ reviewId: review.review_id || state.reviewId, status, review });
   if (status === "processing") {
-    show(renderProcessing(review), { focus: false });
+    showProcessing(review, { announceStage: true });
     setDocumentTitle("Processing");
     pollTimer = window.setTimeout(() => loadReview(state.reviewId, { renderLoading: false, generation }), POLL_INTERVAL_MS);
     return;
   }
   if (status === "needs_review") {
     stopPolling();
+    renderedProcessingSignature = null;
     show(renderReview(state.reviewId, review, {
       onSubmit: async (decisions) => {
         const resumed = await resumeReview(state.reviewId, decisions);
         announce("Decisions saved. Review processing has resumed.");
-        updateState({ status: resumed.status || "processing", review: { ...review, ...resumed } });
-        show(renderProcessing({ ...review, ...resumed }));
+        const resumedReview = resumedReviewState(review, resumed);
+        updateState({ status: resumedReview.status, review: resumedReview });
+        showProcessing(resumedReview, { focus: true, force: true });
         await loadReview(state.reviewId, { renderLoading: false, generation });
       },
     }));
@@ -103,6 +135,7 @@ async function renderCurrentReview(review, generation) {
   }
   if (status === "completed") {
     stopPolling();
+    renderedProcessingSignature = null;
     try {
       const report = await getReport(state.reviewId);
       if (generation !== routeGeneration) return;
@@ -116,6 +149,7 @@ async function renderCurrentReview(review, generation) {
     return;
   }
   if (status === "failed") {
+    renderedProcessingSignature = null;
     showFatal("Review failed", review.error?.message || review.error_message || "EvidenceFlow could not complete this review.");
     return;
   }
@@ -142,6 +176,7 @@ function route() {
   routeGeneration += 1;
   const generation = routeGeneration;
   stopPolling();
+  resetProcessingTracking();
   const reviewId = reviewIdFromHash();
   if (reviewId) loadReview(reviewId, { generation });
   else showUpload();

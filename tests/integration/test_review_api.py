@@ -27,6 +27,7 @@ class NoOpRunner:
 class ProgressGraph:
     async def aget_state(self, _configuration: object) -> SimpleNamespace:
         return SimpleNamespace(
+            next=("normalize_and_check_completeness",),
             values={
                 "classifications": [
                     {"document_id": "one"},
@@ -158,6 +159,16 @@ async def test_create_poll_and_duplicate_document_instances_are_preserved(
         "finding_count": 0,
         "pending_review_count": 0,
     }
+    assert body["progress"]["current_step_id"] == "document_processing"
+    assert [step["status"] for step in body["progress"]["steps"]] == [
+        "current",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+    ]
     assert len({item["document_id"] for item in body["documents"]}) == 3
     assert [item["filename"] for item in body["documents"]].count(
         "application-form.pdf"
@@ -184,6 +195,55 @@ async def test_processing_poll_projects_live_checkpoint_progress(api: APIHarness
         "finding_count": 1,
         "pending_review_count": 0,
     }
+    progress = response.json()["progress"]
+    assert progress["current_step_id"] == "completeness"
+    assert "normalize_and_check_completeness" not in response.text
+    assert [step["status"] for step in progress["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "current",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_review_interrupt_projects_the_waiting_human_stage(
+    api: APIHarness,
+) -> None:
+    created = await create_review(
+        api.client,
+        ("financial.pdf", pdf("field review"), "application/pdf"),
+    )
+    review_id = created.json()["review_id"]
+    await api.repository.save_snapshot(
+        review_id,
+        {
+            "review_stage": "field",
+            "processed_documents": [{}],
+            "classifications": [{}],
+            "extraction_results": [{"fields": []}],
+            "effective_fields": [],
+        },
+    )
+    await add_pending_item(api.repository, review_id)
+
+    response = await api.client.get(f"/api/v1/reviews/{review_id}")
+
+    assert response.status_code == 200
+    progress = response.json()["progress"]
+    assert progress["current_step_id"] == "completeness"
+    assert [step["status"] for step in progress["steps"]] == [
+        "completed",
+        "completed",
+        "completed",
+        "current",
+        "upcoming",
+        "upcoming",
+        "upcoming",
+    ]
 
 
 @pytest.mark.asyncio
@@ -298,6 +358,10 @@ async def test_report_poll_exports_and_not_ready_errors(api: APIHarness) -> None
     poll = await api.client.get(f"/api/v1/reviews/{review_id}")
     assert poll.json()["status"] == "completed"
     assert poll.json()["report_available"] is True
+    assert poll.json()["progress"]["current_step_id"] is None
+    assert {step["status"] for step in poll.json()["progress"]["steps"]} == {
+        "completed"
+    }
     report_response = await api.client.get(f"/api/v1/reviews/{review_id}/report")
     assert report_response.json() == report.model_dump(mode="json")
     json_export = await api.client.get(f"/api/v1/reviews/{review_id}/export.json")

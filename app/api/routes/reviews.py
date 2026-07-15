@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
 from app.api.dependencies import get_container
+from app.api.progress import project_workflow_progress
 from app.api.schemas import (
     CreateReviewResponse,
     ResumeReviewRequest,
@@ -87,21 +88,27 @@ def _review_summary(
 
 async def _latest_checkpoint_snapshot(
     container: Any, review: dict[str, Any], snapshot: dict[str, Any]
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], tuple[str, ...]]:
     graph = getattr(container, "graph", None)
     if review["status"] != "processing" or graph is None:
-        return snapshot
+        return snapshot, ()
     try:
         checkpoint = await graph.aget_state(
             {"configurable": {"thread_id": str(review["thread_id"])}}
         )
     except Exception:
         # Progress projection is optional; durable business state remains canonical.
-        return snapshot
+        return snapshot, ()
     values = getattr(checkpoint, "values", None)
+    raw_next = getattr(checkpoint, "next", ())
+    next_nodes = (
+        tuple(item for item in raw_next if isinstance(item, str))
+        if isinstance(raw_next, (list, tuple))
+        else ()
+    )
     if isinstance(values, Mapping):
-        return {str(key): value for key, value in values.items()}
-    return snapshot
+        return {str(key): value for key, value in values.items()}, next_nodes
+    return snapshot, next_nodes
 
 
 @router.post("", response_model=CreateReviewResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -162,7 +169,12 @@ async def get_review(
 ) -> dict[str, Any]:
     review = await _require_review(container, review_id)
     snapshot = dict(review.get("snapshot") or {})
-    snapshot = await _latest_checkpoint_snapshot(container, review, snapshot)
+    snapshot, next_nodes = await _latest_checkpoint_snapshot(
+        container, review, snapshot
+    )
+    progress = project_workflow_progress(
+        str(review["status"]), snapshot, next_nodes
+    )
     snapshot.update(
         {
             "review_id": review_id,
@@ -172,6 +184,7 @@ async def get_review(
             "documents": snapshot.get("documents", review["documents"]),
             "pending_reviews": review["pending_reviews"],
             "summary": _review_summary(review, snapshot),
+            "progress": progress.model_dump(mode="json"),
             "report_available": review["report"] is not None,
             "error": review.get("error"),
             "revision": review["revision"],

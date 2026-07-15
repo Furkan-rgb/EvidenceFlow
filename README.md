@@ -180,11 +180,13 @@ V1 uses one graph because the task is bounded, sequential, and audit-sensitive. 
 [`frontend/`](frontend/) uses semantic HTML, CSS, ES modules, `fetch`, and no build system. It implements four states:
 
 1. drag/drop upload with selected-file management;
-2. processing with 1.5-second polling and live summary counts;
+2. processing with 1.5-second polling, live summary counts, and an authoritative seven-stage completed/current/upcoming tracker projected from the persisted LangGraph checkpoint;
 3. accessible classification/field/conflict review cards with source-PDF links;
 4. structured report presentation with JSON/Markdown downloads.
 
-The review ID is kept in the URL hash so a refresh restores the active review. Keyboard operation, focus management, live status announcements, reduced-motion support, and high-contrast states are built in. Confidence thresholds, conflicts, severity, and policy applicability never run in JavaScript—the API is the boundary. A future React client would not require a workflow rewrite.
+The tracker uses the stable reviewer-facing sequence **Read PDFs → Classify → Extract fields → Check completeness → Cross-check evidence → Retrieve policy evidence → Compose report**. It is derived from the durable graph checkpoint rather than a timer or estimated percentage, so a long model call stays on its real stage until that work finishes.
+
+The review ID is kept in the URL hash so a refresh restores the active review. Keyboard operation, focus management, stage-transition announcements, reduced-motion support, and high-contrast states are built in. Unchanged polls do not replace the tracker or repeat announcements. Confidence thresholds, conflicts, severity, and policy applicability never run in JavaScript—the API is the boundary. A future React client would not require a workflow rewrite.
 
 ### Persistence and local observability
 
@@ -249,7 +251,7 @@ FastAPI serves the JSON API and static frontend in one local process.
 | --- | --- | --- |
 | `GET` | `/health` | Liveness/readiness plus safe SQLite, index, Ollama, and MLflow states |
 | `POST` | `/api/v1/reviews` | Upload multipart field `files`; returns `202 processing` |
-| `GET` | `/api/v1/reviews/{review_id}` | Poll processing, pending-review, completed, or failed state |
+| `GET` | `/api/v1/reviews/{review_id}` | Poll state, summary counts, and stable workflow-step progress without exposing internal graph node names |
 | `POST` | `/api/v1/reviews/{review_id}/resume` | Atomically submit the complete pending decision batch |
 | `GET` | `/api/v1/reviews/{review_id}/report` | Validated structured report after completion |
 | `GET` | `/api/v1/reviews/{review_id}/export.json` | Auditable JSON export |
@@ -427,7 +429,7 @@ Open `http://127.0.0.1:8000/`, then drag every PDF from one bundle's `documents/
 | `eval/bundles/bundle_019/documents/*.pdf` | Recognized but incomplete financial statement |
 | `eval/bundles/bundle_020/documents/*.pdf` | Typed human correction before validation completes |
 
-The other numbered bundles are deterministic variants of the same scenario families. For an interactive review, keep the app page open while it polls. When it pauses, inspect the evidence link (which opens the owned PDF at the cited page), submit one decision for every pending card, and continue until the structured report appears. Finally, inspect the findings and policy citations and download both JSON and Markdown exports. The URL hash retains the review ID, so refreshing or sharing that local URL restores the same persisted review on that machine.
+The other numbered bundles are deterministic variants of the same scenario families. For an interactive review, keep the app page open while it polls; the tracker distinguishes finished work, the active stage, and what comes next. When it pauses, inspect the evidence link (which opens the owned PDF at the cited page), submit one decision for every pending card, and continue until the structured report appears. Finally, inspect the findings and policy citations and download both JSON and Markdown exports. The URL hash retains the review ID, so refreshing or sharing that local URL restores the same persisted review on that machine.
 
 The policy citations explain which local policy sections apply to verified findings; they are not model-generated authorities. The report status, normalized values, conflict findings, and accepted reference IDs remain code-owned even though Gemma writes the narrative.
 
@@ -516,6 +518,8 @@ Keep MLflow running throughout. The explicit equivalent is `uv run python -m app
 ### Generated results
 
 The genuine local run completed at `2026-07-14T23:11:16Z` with `gemma4:12b-mlx` for classification, extraction, and reporting and `embeddinggemma` for retrieval. It evaluated all 20 bundles / 64 PDFs from fresh model calls (`cache_hit_count: 0`) in 3,971.48 seconds. These values are copied from the committed [JSON result](eval/results/evaluation-results.json) and [generated Markdown result](eval/results/evaluation-results.md), not estimated or hand-written.
+
+Those artifacts identify the exact evaluated implementation by hash. Later UI or API-only changes, including the workflow-progress projection, do not retroactively alter the recorded run; run `make evaluate` again before presenting the metrics as measurements of a newer implementation hash.
 
 | Metric | Measured result |
 | --- | ---: |

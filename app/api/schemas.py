@@ -6,6 +6,43 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+WorkflowStepId = Literal[
+    "document_processing",
+    "classification",
+    "extraction",
+    "completeness",
+    "cross_check",
+    "policy_retrieval",
+    "report_composition",
+]
+WorkflowStepStatus = Literal["completed", "current", "upcoming"]
+
+
+class WorkflowProgressStep(BaseModel):
+    """One stable, user-facing stage in the review workflow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: WorkflowStepId
+    status: WorkflowStepStatus
+
+
+class WorkflowProgress(BaseModel):
+    """Current workflow position without exposing internal graph node names."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_step_id: WorkflowStepId | None
+    steps: list[WorkflowProgressStep] = Field(min_length=7, max_length=7)
+
+    @model_validator(mode="after")
+    def validate_current_step(self) -> WorkflowProgress:
+        current = [step.id for step in self.steps if step.status == "current"]
+        expected = [] if self.current_step_id is None else [self.current_step_id]
+        if current != expected:
+            raise ValueError("current_step_id must identify the one current workflow step")
+        return self
+
 
 class ReviewDecisionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
