@@ -182,9 +182,90 @@ baseline/finding query → embeddinggemma → 768-dimensional query vector
 
 At index-build time, [`PolicyIndexBuilder`](app/retrieval/index.py) uses `embeddinggemma` to embed the policy chunks. During a review, [`LangChainEmbeddingProvider`](app/ai/models/embedding.py) converts each query into the same vector space, and [`SqliteVecPolicyRetriever`](app/retrieval/sqlite_vec.py) performs the search. sqlite-vec returns the three nearest chunks per query; EvidenceFlow removes duplicate evidence IDs, keeps the best score for each chunk, and supplies at most eight chunks to `ReportComposer`.
 
-The returned `PolicyEvidence` contains a stable evidence ID, policy ID, section ID, text, source path, and similarity score. Gemma may cite those evidence IDs in its narrative, but deterministic code rejects references that were not retrieved. Even a review with no findings runs the baseline query so the report can receive general onboarding and manual-review policy context.
+The vector is used only inside retrieval; it is never passed to the reporting Gemma. Once sqlite-vec identifies a match, EvidenceFlow loads the original policy-chunk text and constructs `PolicyEvidence` containing a stable evidence ID, policy ID, title, section ID, text, source path, and similarity score. The 768-dimensional vector is not included.
+
+`ReportComposer` serializes the `VerifiedReview` and the retrieved `PolicyEvidence` objects as JSON for Gemma. Gemma therefore reads the actual policy text plus its identifiers and score, not the numerical embeddings. It may cite the supplied evidence IDs in its narrative, but deterministic code rejects references that were not retrieved. Even a review with no findings runs the baseline query so the report can receive general onboarding and manual-review policy context.
 
 This is why `embeddinggemma` must be available both when rebuilding the index and while reviews are running. Query vectors are comparable with stored policy vectors only when the embedding model and dimensions match; changing that identity requires `make rebuild`.
+
+### Complete flow in one view
+
+The complete path from an uploaded PDF to a final report is:
+
+```text
+1. PDF PACKAGE
+   Application form + company extract + financial statement
+                              │
+                              ▼
+2. DOCUMENT PROCESSING — PyMuPDF
+   Validate each PDF and extract ordered text with one-based page numbers
+                              │
+                              ▼
+3. CLASSIFICATION — gemma4:12b-mlx
+   Propose a document type and confidence for each PDF
+                              │
+              confidence < 0.70? ── yes ──▶ human classification review
+                              │                         │
+                              ◀─────────────────────────┘
+                              ▼
+4. FIELD EXTRACTION — gemma4:12b-mlx
+   Propose typed fields, confidence, and source-page evidence
+                              │
+   non-null confidence < 0.75? ── yes ──▶ human field review
+                              │                    │
+                              ◀────────────────────┘
+                              ▼
+5. EFFECTIVE VALUES — deterministic Python
+   Preserve original output, apply approved corrections, and normalize values
+                              │
+                              ▼
+6. FINDING GENERATION — deterministic Python
+   Check required documents and fields, then compare configured values
+
+   Possible findings:
+   • missing_document
+   • missing_required_field
+   • field_conflict
+                              │
+             field conflict? ── yes ──▶ human conflict review
+                              │                   │
+                              ◀──── revalidate ───┘
+                              ▼
+7. POLICY-QUERY CREATION — deterministic Python
+   Always create a baseline query and add one fixed-template query per finding
+                              │
+                              ▼
+8. POLICY RETRIEVAL — embeddinggemma + sqlite-vec
+   Embed each query, compare it with stored policy-chunk vectors,
+   then load the original text and IDs for the closest policy chunks
+                              │
+                              ▼
+9. REPORT COMPOSITION — gemma4:12b-mlx
+   Receive VerifiedReview JSON plus policy text/metadata JSON—not vectors—and write narrative
+                              │
+                              ▼
+10. FINALIZATION — deterministic Python
+    Reject unknown finding/policy references, impose canonical company identity,
+    and set status to incomplete, needs_follow_up, or complete
+                              │
+                              ▼
+11. PERSISTED RESULT
+    Save the auditable report and expose it in the UI and JSON/Markdown exports
+```
+
+The most important transitions are:
+
+```text
+Gemma proposals
+    → human-approved effective values
+    → deterministic findings
+    → deterministic policy-search queries
+    → retrieved policy evidence
+    → Gemma narrative
+    → deterministic final report
+```
+
+Low confidence and findings are different concepts. Low confidence creates a review item because the model is uncertain. A finding is created by deterministic validation because required evidence is missing or configured values disagree. Only the resulting findings drive finding-specific policy queries.
 
 ## Architecture
 
