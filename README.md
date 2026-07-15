@@ -5,7 +5,7 @@ EvidenceFlow is a local document-review workflow for synthetic company-onboardin
 It is deliberately not a chatbot or an autonomous-agent demo. The models interpret documents and write narrative; deterministic code owns validation, findings, and final status.
 
 > [!IMPORTANT]
-> EvidenceFlow V1 is a local portfolio system for synthetic documents only. It has no authentication boundary. Do not expose it to the internet or use it with personal, customer, regulated, confidential, or otherwise sensitive data.
+> EvidenceFlow is a local portfolio system for synthetic documents only. It has no authentication boundary. Do not expose it to the internet or use it with personal, customer, regulated, confidential, or otherwise sensitive data.
 
 ## Quick start
 
