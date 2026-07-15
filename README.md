@@ -139,6 +139,53 @@ original model field + source citation
 
 The API requires exactly one valid decision for every item in the current interrupt. An atomic transition changes the review from `needs_review` back to `processing`; repeated or concurrent resume attempts receive `409 Conflict`. LangGraph resumes the same thread, and the deterministic checks run again before reporting.
 
+### How policy queries and embeddings work
+
+A policy query is a short, plain-English search sentence created after validation by the deterministic [`_policy_queries`](app/graph/workflow.py) helper. It is not written by the chat model or entered by the reviewer, and it does not decide whether a finding exists. Its only purpose is to find relevant passages in the local policy corpus.
+
+Every review starts with this baseline query:
+
+```text
+required onboarding documents, reliable evidence, and manual review requirements
+```
+
+Code then adds one query for each finding, using fixed templates:
+
+| Finding | Query template |
+| --- | --- |
+| Missing document | `required document missing {document_type} onboarding evidence` |
+| Missing required field | `incomplete {document_type} missing {field_name}` |
+| Conflicting field | `conflicting {field_name} evidence and manual review resolution` |
+
+For example, a registration-number conflict produces two queries:
+
+```text
+required onboarding documents, reliable evidence, and manual review requirements
+conflicting registration_number evidence and manual review resolution
+```
+
+Policy retrieval uses the embedder in two related phases:
+
+```text
+Policy-index build (`make rebuild`)
+policy Markdown → section-aware chunks → embeddinggemma → stored 768-dimensional vectors
+
+Review execution
+baseline/finding query → embeddinggemma → 768-dimensional query vector
+                                           ↓
+                              sqlite-vec cosine search
+                                           ↓
+                              ranked policy-evidence chunks
+                                           ↓
+                                  constrained report input
+```
+
+At index-build time, [`PolicyIndexBuilder`](app/retrieval/index.py) uses `embeddinggemma` to embed the policy chunks. During a review, [`LangChainEmbeddingProvider`](app/ai/models/embedding.py) converts each query into the same vector space, and [`SqliteVecPolicyRetriever`](app/retrieval/sqlite_vec.py) performs the search. sqlite-vec returns the three nearest chunks per query; EvidenceFlow removes duplicate evidence IDs, keeps the best score for each chunk, and supplies at most eight chunks to `ReportComposer`.
+
+The returned `PolicyEvidence` contains a stable evidence ID, policy ID, section ID, text, source path, and similarity score. Gemma may cite those evidence IDs in its narrative, but deterministic code rejects references that were not retrieved. Even a review with no findings runs the baseline query so the report can receive general onboarding and manual-review policy context.
+
+This is why `embeddinggemma` must be available both when rebuilding the index and while reviews are running. Query vectors are comparable with stored policy vectors only when the embedding model and dimensions match; changing that identity requires `make rebuild`.
+
 ## Architecture
 
 ### Capability boundaries
