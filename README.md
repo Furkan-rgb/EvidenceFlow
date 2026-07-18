@@ -89,17 +89,17 @@ flowchart TD
 ```
 **The core flow:**
 
-Upload → FastAPI validates and stores PDFs
-Process → PyMuPDF extracts pages with one-based numbering
-Classify → Gemma proposes document type (low confidence → human review)
-Extract → Gemma returns typed fields + confidence + source pages
-Normalize → Python canonicalizes names, registration numbers
-Validate → Python checks required docs/fields, compares cross-document values
-Conflict → If differences found, pause for human decision (select/correct/unresolved)
-Retrieve → Python creates baseline + finding-specific policy queries
-Report → Gemma writes narrative from verified state + policy chunks
-Finalize → Python validates report, sets status (incomplete/needs_follow_up/complete)
-Export → JSON + Markdown + auditable decision history
+1. Upload → FastAPI validates and stores PDFs
+2. Process → PyMuPDF extracts pages with one-based numbering
+3. Classify → Gemma proposes document type (low confidence → human review)
+4. Extract → Gemma returns typed fields + confidence + source pages
+5. Normalize → Python canonicalizes names, registration numbers
+6. Validate → Python checks required docs/fields, compares cross-document values
+7. Conflict → If differences found, pause for human decision (select/correct/unresolved)
+8. Retrieve → Python creates baseline + finding-specific policy queries
+9. Report → Gemma writes narrative from verified state + policy chunks
+10. Finalize → Python validates report, sets status (incomplete/needs_follow_up/complete)
+11. Export → JSON + Markdown + auditable decision history
 
 The review state preserves field/page provenance and reviewer actions, while report sections may reference only findings and policy evidence supplied in the verified inputs.
 
