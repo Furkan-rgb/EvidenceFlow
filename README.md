@@ -87,17 +87,19 @@ flowchart TD
     V -->|validated findings| R[Retrieve relevant policy sections]
     R --> G[Compose and validate the report]
 ```
+**The core flow:**
 
-Here is the same flow in plain language:
-
-1. **Accept and persist the package.** FastAPI validates the upload boundary, stores each PDF under generated identifiers, creates a review with a stable `review_id` and `thread_id`, and places a job in the durable local queue.
-2. **Read the PDFs.** PyMuPDF validates document structure, encryption, page limits, and useful text. It produces ordered pages with one-based page numbers. Scanned or effectively textless PDFs fail with an explicit V1 limitation instead of silently invoking OCR.
-3. **Classify each document.** Gemma proposes one of the five supported types, a confidence score, and reasoning. If confidence is below `0.70`, the workflow saves a classification-review item and pauses.
-4. **Extract typed fields.** Once the effective document type is known, Gemma returns only the fields allowed for that type. Every non-null field includes confidence and source-page evidence. A non-null field with confidence below `0.75` creates a field-review item.
-5. **Normalize and validate in code.** Python canonicalizes names and registration numbers, checks every required document and field, and compares every eligible value under the configured cross-document rules—including duplicates. This step does not ask the model whether two values conflict.
-6. **Resolve conflicts when necessary.** A reviewer can select one cited value, enter a typed correction, or mark the conflict unresolved. The original model values and citations remain unchanged.
-7. **Retrieve policy evidence.** Code creates one baseline query plus finding-specific queries over six local Markdown policies. The retriever returns ranked chunks with stable evidence, policy, and section IDs. Policy retrieval supports a finding; it never creates or decides one.
-8. **Compose a constrained report.** Gemma writes the executive summary and narrative sections from a sealed verified state. Code supplies the canonical company name and status, and rejects any finding or policy reference not present in the verified inputs.
+Upload → FastAPI validates and stores PDFs
+Process → PyMuPDF extracts pages with one-based numbering
+Classify → Gemma proposes document type (low confidence → human review)
+Extract → Gemma returns typed fields + confidence + source pages
+Normalize → Python canonicalizes names, registration numbers
+Validate → Python checks required docs/fields, compares cross-document values
+Conflict → If differences found, pause for human decision (select/correct/unresolved)
+Retrieve → Python creates baseline + finding-specific policy queries
+Report → Gemma writes narrative from verified state + policy chunks
+Finalize → Python validates report, sets status (incomplete/needs_follow_up/complete)
+Export → JSON + Markdown + auditable decision history
 
 The review state preserves field/page provenance and reviewer actions, while report sections may reference only findings and policy evidence supplied in the verified inputs.
 
